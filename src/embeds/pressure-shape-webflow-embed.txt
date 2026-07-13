@@ -770,17 +770,20 @@
 
     function getResponsiveAnchor(el, index, total, layout, preserveShapeProfile) {
       var role = el.dataset.pressureRole || el.dataset.role || '';
-      var defaults = ITEM_DEFAULTS[role] || getAutoAnchor(index, total);
+      var useHealSlot = !preserveShapeProfile && shouldUseHealSlot(el, layout);
+      var anchorRole = useHealSlot ? 'heal' : role;
+      var defaults = ITEM_DEFAULTS[anchorRole] || getAutoAnchor(index, total);
 
       if (layout && layout.mobileLabelsLocked && !preserveShapeProfile) {
         if (role === 'chill') return { x: 50, y: 20 };
+        if (useHealSlot) return getHealAnchor(layout);
         if (role === 'and') return { x: 71, y: 72 };
       }
 
       if (layout && layout.placement === 'vertical') {
-        if (role === 'chill') return { x: 50, y: 20 };
-        if (role === 'heal') return { x: 29, y: 72 };
-        if (role === 'and') return { x: 71, y: 72 };
+        if (anchorRole === 'chill') return { x: 50, y: 20 };
+        if (anchorRole === 'heal') return getHealAnchor(layout);
+        if (anchorRole === 'and') return { x: 71, y: 72 };
 
         if (index === 0) return { x: 50, y: 20 };
 
@@ -797,6 +800,30 @@
         x: readNumber(el, 'anchorX', defaults.x),
         y: readNumber(el, 'anchorY', defaults.y)
       };
+    }
+
+    function getHealAnchor(layout) {
+      if (layout && layout.placement === 'vertical') return { x: 29, y: 72 };
+
+      return { x: ITEM_DEFAULTS.heal.x, y: ITEM_DEFAULTS.heal.y };
+    }
+
+    function shouldUseHealSlot(el, layout) {
+      if (!layout || window.innerWidth > CONFIG.tabletMaxWidth) return false;
+
+      var role = el.dataset.pressureRole || el.dataset.role || '';
+
+      if (role !== 'and') return false;
+
+      var slide = el.closest(CONFIG.slideSelector);
+
+      if (!slide) return false;
+
+      return Array.prototype.slice.call(slide.querySelectorAll(CONFIG.itemSelector)).some(function (item) {
+        var itemRole = item.dataset.pressureRole || item.dataset.role || '';
+
+        return itemRole === 'heal' && item.querySelector('.hidden');
+      });
     }
 
     function isMobileLabelLocked(el, layout) {
@@ -1035,9 +1062,13 @@
     }
 
     function getResponsiveConstraintPlacements(movers, points, baseDeformedPoints, rect, stageRect, globalMotion) {
+      var keepFixedMobileAnchorsInViewport = movers.some(function (mover) {
+        return mover.fixedMobileAnchor;
+      });
+
       if (
         window.innerWidth > CONFIG.constraintMaxViewportWidth ||
-        !shouldKeepItemsInViewport(stageRect)
+        !shouldKeepItemsInViewport(stageRect, keepFixedMobileAnchorsInViewport)
       ) {
         return null;
       }
@@ -1382,7 +1413,18 @@
       };
     }
 
-    function shouldKeepItemsInViewport(stageRect) {
+    function shouldKeepItemsInViewport(stageRect, keepWhileVisible) {
+      if (keepWhileVisible) {
+        var padding = CONFIG.itemViewportPadding;
+
+        return (
+          stageRect.right > padding &&
+          stageRect.left < window.innerWidth - padding &&
+          stageRect.bottom > padding &&
+          stageRect.top < window.innerHeight - padding
+        );
+      }
+
       return window.scrollY <= 1 && stageRect.top >= -1 && stageRect.left >= -1;
     }
 
