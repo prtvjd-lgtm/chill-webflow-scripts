@@ -43,7 +43,7 @@
     envelopeDownRatio: 0.55,
     cardLiftRatio: 0.55,
     minimumTabGap: 48,
-    duration: 800,
+    duration: 1000,
     easing: 'cubic-bezier(0.075, 0.82, 0.165, 1)',
     boxShadow: '0 35px 32px 0 rgba(65, 56, 52, 0.08), 0 5px 23px 0 rgba(65, 56, 52, 0.10)',
     perspective: 1000,
@@ -303,7 +303,7 @@
     return Math.min(Math.max(value, min), max);
   }
 
-  function prepareCardHover(card, canvas, stage, isCardActive, getTabs) {
+  function prepareCardHover(card, canvas, stage, isCardActive, getTabs, hideInactiveCards) {
     const hover = {
       card: card,
       canvas: canvas,
@@ -463,6 +463,10 @@
 
     hover.activate = function (event) {
       if (hover.isHovered || !isCardActive()) return;
+
+      if (hideInactiveCards) {
+        hideInactiveCards(card);
+      }
 
       hover.isHovered = true;
       hover.isEnabled = true;
@@ -821,6 +825,15 @@
     let cardTransitionId = 0;
     const cardHovers = new Map();
 
+    function hideInactiveCards(hoveredCard) {
+      cards.forEach(function (card) {
+        if (card === hoveredCard) return;
+
+        resetRealCard(card);
+        setVisibility(card, false);
+      });
+    }
+
     if (cardStage && cardCanvas) {
       cards.forEach(function (card) {
         cardHovers.set(card, prepareCardHover(
@@ -832,7 +845,8 @@
           },
           function () {
             return validTabs;
-          }
+          },
+          hideInactiveCards
         ));
       });
 
