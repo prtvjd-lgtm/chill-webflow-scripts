@@ -1,0 +1,202 @@
+<!-- Мобильное меню -->
+<style>
+  @media (max-width: 990px) {
+    [data-mobile-menu].is-mobile-menu-closed {
+      display: none !important;
+    }
+  }
+</style>
+
+<script>
+(function () {
+  if (window.WebflowMobileMenu) return;
+
+  window.WebflowMobileMenu = true;
+
+  const SELECTORS = {
+    toggle: '[data-mobile-menu-toggle]',
+    menu: '[data-mobile-menu]',
+    item: '[data-mobile-menu-item]'
+  };
+
+  const CLOSED_CLASS = 'is-mobile-menu-closed';
+  const ANIMATION = {
+    duration: 600,
+    stagger: 70,
+    offsetX: 10,
+    easing: 'cubic-bezier(0.075, 0.82, 0.165, 1)'
+  };
+
+  const compactViewport = window.matchMedia('(max-width: 990px)');
+  const toggle = document.querySelector(SELECTORS.toggle);
+  const menu = document.querySelector(SELECTORS.menu);
+
+  if (!toggle || !menu) return;
+
+  const items = Array.from(menu.querySelectorAll(SELECTORS.item));
+  const itemStyles = new WeakMap();
+  const initialAttributes = {
+    menuAriaHidden: menu.getAttribute('aria-hidden'),
+    toggleAriaExpanded: toggle.getAttribute('aria-expanded')
+  };
+  let timers = [];
+  let revealFrame = 0;
+
+  if (!menu.id) {
+    menu.id = 'mobile-menu';
+  }
+
+  toggle.setAttribute('aria-controls', menu.id);
+
+  function prefersReducedMotion() {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  function restoreAttribute(element, name, value) {
+    if (value === null) {
+      element.removeAttribute(name);
+      return;
+    }
+
+    element.setAttribute(name, value);
+  }
+
+  function saveItemStyles(item) {
+    if (itemStyles.has(item)) {
+      return itemStyles.get(item);
+    }
+
+    const styles = {
+      opacity: item.style.opacity,
+      transform: item.style.transform,
+      transition: item.style.transition,
+      willChange: item.style.willChange,
+      baseTransform: ''
+    };
+
+    itemStyles.set(item, styles);
+    return styles;
+  }
+
+  function restoreItemStyles(item) {
+    const styles = itemStyles.get(item);
+
+    if (!styles) return;
+
+    item.style.opacity = styles.opacity;
+    item.style.transform = styles.transform;
+    item.style.transition = styles.transition;
+    item.style.willChange = styles.willChange;
+    itemStyles.delete(item);
+  }
+
+  function clearAnimation() {
+    window.cancelAnimationFrame(revealFrame);
+    revealFrame = 0;
+
+    timers.forEach(function (timer) {
+      window.clearTimeout(timer);
+    });
+
+    timers = [];
+    items.forEach(restoreItemStyles);
+  }
+
+  function closeMenu() {
+    if (!compactViewport.matches) return;
+
+    clearAnimation();
+    menu.classList.add(CLOSED_CLASS);
+    menu.setAttribute('aria-hidden', 'true');
+    toggle.setAttribute('aria-expanded', 'false');
+  }
+
+  function restoreDesktopMenu() {
+    clearAnimation();
+    menu.classList.remove(CLOSED_CLASS);
+    menu.hidden = false;
+    restoreAttribute(menu, 'aria-hidden', initialAttributes.menuAriaHidden);
+    restoreAttribute(toggle, 'aria-expanded', initialAttributes.toggleAriaExpanded);
+  }
+
+  function prepareItem(item) {
+    const styles = saveItemStyles(item);
+    const computedTransform = window.getComputedStyle(item).transform;
+
+    styles.baseTransform = computedTransform === 'none' ? '' : computedTransform;
+    item.style.opacity = '0';
+    item.style.transform = 'translate3d(' + ANIMATION.offsetX + 'px, 0, 0) ' + styles.baseTransform;
+    item.style.transition = 'none';
+    item.style.willChange = 'opacity, transform';
+  }
+
+  function openMenu() {
+    if (!compactViewport.matches) return;
+
+    clearAnimation();
+    menu.hidden = false;
+    menu.classList.remove(CLOSED_CLASS);
+    menu.setAttribute('aria-hidden', 'false');
+    toggle.setAttribute('aria-expanded', 'true');
+
+    if (prefersReducedMotion()) return;
+
+    items.forEach(prepareItem);
+    menu.getBoundingClientRect();
+
+    revealFrame = window.requestAnimationFrame(function () {
+      items.forEach(function (item, index) {
+        const timer = window.setTimeout(function () {
+          const styles = itemStyles.get(item);
+
+          if (!styles) return;
+
+          item.style.transition =
+            'opacity ' + ANIMATION.duration + 'ms ' + ANIMATION.easing + ', ' +
+            'transform ' + ANIMATION.duration + 'ms ' + ANIMATION.easing;
+          item.style.opacity = '1';
+          item.style.transform = styles.baseTransform;
+        }, index * ANIMATION.stagger);
+
+        timers.push(timer);
+      });
+
+      const cleanupTimer = window.setTimeout(function () {
+        items.forEach(restoreItemStyles);
+        timers = [];
+      }, Math.max(0, items.length - 1) * ANIMATION.stagger + ANIMATION.duration + 80);
+
+      timers.push(cleanupTimer);
+    });
+  }
+
+  function syncViewport() {
+    if (compactViewport.matches) {
+      closeMenu();
+      return;
+    }
+
+    restoreDesktopMenu();
+  }
+
+  toggle.addEventListener('click', function (event) {
+    if (!compactViewport.matches) return;
+
+    event.preventDefault();
+
+    if (menu.classList.contains(CLOSED_CLASS)) {
+      openMenu();
+    } else {
+      closeMenu();
+    }
+  });
+
+  if (compactViewport.addEventListener) {
+    compactViewport.addEventListener('change', syncViewport);
+  } else {
+    compactViewport.addListener(syncViewport);
+  }
+
+  syncViewport();
+})();
+</script>

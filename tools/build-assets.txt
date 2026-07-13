@@ -59,6 +59,7 @@ function minify(content, loader) {
 const embeds = {
   cmsPagination: function () { return readSource('cms-pagination-script.txt'); },
   header: function () { return readSource('header-switcher-script.txt'); },
+  mobileMenu: function () { return readSource('mobile-menu-script.txt'); },
   howChoicePopup: function () { return readSource('how-choice-popup-script.txt'); },
   studioMediaGallery: function () { return readSource('studio-media-gallery-script.txt'); },
   studioMap: function () { return readSource('studio-map-yandex-script.txt'); },
@@ -97,6 +98,7 @@ const bundles = {
   site: [
     'cmsPagination',
     'header',
+    'mobileMenu',
     'howChoicePopup',
     'studioMediaGallery',
     'studioMap',
