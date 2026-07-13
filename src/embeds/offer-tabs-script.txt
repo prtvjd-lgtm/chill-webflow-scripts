@@ -124,6 +124,13 @@
       ' rotateY(' + rotateY.toFixed(3) + 'deg)';
   }
 
+  function getCurrentCardOffsetY(card) {
+    const baseMatrix = rememberRealCardStyles(card).matrix;
+    const currentMatrix = getBaseCardMatrix(card);
+
+    return currentMatrix.translateY - baseMatrix.translateY;
+  }
+
   function getBaseStageMatrix(stage) {
     const transform = window.getComputedStyle(stage).transform;
     const match = /^matrix\(([^)]+)\)$/.exec(transform);
@@ -427,7 +434,7 @@
       const envelopeDownY = cardHeight * CARD_HOVER.envelopeDownRatio;
       const desiredCardLiftY = cardHeight * CARD_HOVER.cardLiftRatio;
       const tabsBottom = getTabsBottom();
-      const restingCardTop = cardRect.top + (hover.isHovered && hover.offsets ? hover.offsets.cardLiftY : 0);
+      const restingCardTop = cardRect.top - getCurrentCardOffsetY(card);
       const maximumCardLiftY = Number.isFinite(tabsBottom)
         ? Math.max(0, restingCardTop - tabsBottom - CARD_HOVER.minimumTabGap)
         : desiredCardLiftY;
