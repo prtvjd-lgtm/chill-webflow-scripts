@@ -300,7 +300,7 @@
           globalMotion
         );
         var layoutTarget = getLayoutDentTarget(
-          constraintPlacements,
+          state.layout.layoutDentsEnabled ? constraintPlacements : null,
           points,
           baseDeformedPoints,
           rect,
@@ -448,6 +448,7 @@
 
         mover.anchorTargetX = anchor.x / 100;
         mover.anchorTargetY = anchor.y / 100;
+        mover.fixedMobileAnchor = isMobileLabelLocked(mover.el, layout);
         mover.placement = null;
         updatedMovers.push(mover);
       });
@@ -675,6 +676,7 @@
           anchorTargetY: anchor.y / 100,
           anchorIndex: 0,
           flowIndex: 0,
+          fixedMobileAnchor: isMobileLabelLocked(el, layout),
           placement: null,
           pressureWeight: 1,
           pressureTransition: null,
@@ -723,6 +725,8 @@
         return {
           key: 'vertical',
           placement: 'vertical',
+          layoutDentsEnabled: false,
+          mobileLabelsLocked: true,
           pressureScale: CONFIG.pressureScale * compactScale,
           ambientScale: compactScale,
           globalMotionScale: compactScale
@@ -733,6 +737,8 @@
         return {
           key: 'side-soft',
           placement: 'side',
+          layoutDentsEnabled: false,
+          mobileLabelsLocked: true,
           pressureScale: CONFIG.pressureScale * compactScale,
           ambientScale: compactScale,
           globalMotionScale: compactScale
@@ -743,6 +749,8 @@
         return {
           key: 'vertical',
           placement: 'vertical',
+          layoutDentsEnabled: false,
+          mobileLabelsLocked: false,
           pressureScale: CONFIG.pressureScale * compactScale,
           ambientScale: compactScale,
           globalMotionScale: compactScale
@@ -752,15 +760,22 @@
       return {
         key: 'side',
         placement: 'side',
+        layoutDentsEnabled: true,
+        mobileLabelsLocked: false,
         pressureScale: CONFIG.pressureScale,
         ambientScale: 1,
         globalMotionScale: 1
       };
     }
 
-    function getResponsiveAnchor(el, index, total, layout) {
+    function getResponsiveAnchor(el, index, total, layout, preserveShapeProfile) {
       var role = el.dataset.pressureRole || el.dataset.role || '';
       var defaults = ITEM_DEFAULTS[role] || getAutoAnchor(index, total);
+
+      if (layout && layout.mobileLabelsLocked && !preserveShapeProfile) {
+        if (role === 'chill') return { x: 50, y: 20 };
+        if (role === 'and') return { x: 71, y: 72 };
+      }
 
       if (layout && layout.placement === 'vertical') {
         if (role === 'chill') return { x: 50, y: 20 };
@@ -782,6 +797,14 @@
         x: readNumber(el, 'anchorX', defaults.x),
         y: readNumber(el, 'anchorY', defaults.y)
       };
+    }
+
+    function isMobileLabelLocked(el, layout) {
+      if (!layout || !layout.mobileLabelsLocked) return false;
+
+      var role = el.dataset.pressureRole || el.dataset.role || '';
+
+      return role === 'chill' || role === 'and';
     }
 
     function startMaskIntro(mask, reduceMotion) {
@@ -1029,6 +1052,23 @@
         if (itemRect.width <= 0 || itemRect.height <= 0) return;
 
         var desiredIndex = Number.isFinite(mover.flowIndex) ? mover.flowIndex : mover.anchorIndex;
+
+        if (mover.fixedMobileAnchor) {
+          var fixedPlacement = getItemPlacement(
+            mover,
+            desiredIndex,
+            points,
+            baseDeformedPoints,
+            rect,
+            stageRect,
+            globalMotion,
+            itemRect
+          );
+
+          occupiedPlacements.push(getItemPlacementBounds(fixedPlacement, itemRect, stageRect));
+          return;
+        }
+
         var best = null;
         var fallback = null;
 
@@ -1214,6 +1254,8 @@
     }
 
     function resolveItemPlacementIndex(mover, desiredIndex, points, deformedPoints, rect, stageRect, globalMotion, itemRect, occupiedPlacements) {
+      if (mover.fixedMobileAnchor) return desiredIndex;
+
       if (!shouldKeepItemsInViewport(stageRect) || itemRect.width <= 0 || itemRect.height <= 0) {
         return desiredIndex;
       }
@@ -1445,7 +1487,7 @@
       var seed = slideIndex + 1;
       var items = getSlideItems(slide);
       var centers = items.map(function (el, index) {
-        var target = getResponsiveAnchor(el, index, items.length || 3, layout);
+        var target = getResponsiveAnchor(el, index, items.length || 3, layout, true);
 
         return {
           index: findNearestNormalizedPointIndex(points, {
@@ -1568,7 +1610,7 @@
     }
 
     function getFlowIndex(mover, t, zoneSize, pointCount, reduceMotion) {
-      if (reduceMotion || CONFIG.flowAmount <= 0) return mover.anchorIndex;
+      if (mover.fixedMobileAnchor || reduceMotion || CONFIG.flowAmount <= 0) return mover.anchorIndex;
 
       var amount = zoneSize * CONFIG.flowAmount;
       var drift =
