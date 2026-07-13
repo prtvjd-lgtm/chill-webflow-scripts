@@ -40,13 +40,14 @@
     inactive: '-1'
   };
   const CARD_HOVER = {
-    envelopeDownRatio: 0.393,
+    envelopeDownRatio: 0.4715,
     cardLiftRatio: 0.55,
     mobileBreakpoint: 991,
     mobileEnvelopeDownMultiplier: 0.85,
-    mobileCardLiftMultiplier: 0.5,
+    mobileCardLiftMultiplier: 0.6,
     minimumTabGap: 48,
     duration: 1000,
+    mobileDuration: 800,
     easing: 'cubic-bezier(0.075, 0.82, 0.165, 1)',
     boxShadow: '0 35px 32px 0 rgba(65, 56, 52, 0.08), 0 5px 23px 0 rgba(65, 56, 52, 0.10)',
     perspective: 1000,
@@ -77,6 +78,10 @@
 
   function isMobileOfferCardMode() {
     return window.innerWidth <= CARD_HOVER.mobileBreakpoint;
+  }
+
+  function getCardHoverDuration() {
+    return isMobileOfferCardMode() ? CARD_HOVER.mobileDuration : CARD_HOVER.duration;
   }
 
   function setVisibility(element, isVisible) {
@@ -215,9 +220,10 @@
 
     clearCardStageTimer(stage);
     rememberCardStageStyles(stage);
+    const duration = getCardHoverDuration();
     stage.style.willChange = 'transform';
     stage.style.transition = animate && !reduceMotion()
-      ? 'transform ' + CARD_HOVER.duration + 'ms ' + CARD_HOVER.easing
+      ? 'transform ' + duration + 'ms ' + CARD_HOVER.easing
       : 'none';
     stage.style.transform = getStageTransform(stage, offsetY);
   }
@@ -228,6 +234,7 @@
     clearCardStageTimer(stage);
     const styles = rememberCardStageStyles(stage);
     const targetTop = styles.baseTop + offsetY;
+    const duration = getCardHoverDuration();
 
     stage.style.willChange = 'top';
 
@@ -240,7 +247,7 @@
     stage.style.transition = 'none';
     stage.style.top = styles.baseTop + 'px';
     stage.getBoundingClientRect();
-    stage.style.transition = 'top ' + CARD_HOVER.duration + 'ms ' + CARD_HOVER.easing;
+    stage.style.transition = 'top ' + duration + 'ms ' + CARD_HOVER.easing;
     stage.style.top = targetTop + 'px';
   }
 
@@ -248,17 +255,18 @@
     if (!stage || !stage.__offerTabsCardStageStyles) return;
 
     clearCardStageTimer(stage);
+    const duration = getCardHoverDuration();
 
     if (!animate || reduceMotion()) {
       restoreCardStage(stage);
       return;
     }
 
-    stage.style.transition = 'transform ' + CARD_HOVER.duration + 'ms ' + CARD_HOVER.easing;
+    stage.style.transition = 'transform ' + duration + 'ms ' + CARD_HOVER.easing;
     stage.style.transform = getStageTransform(stage, 0);
     stage.__offerTabsCardStageTimer = window.setTimeout(function () {
       restoreCardStage(stage);
-    }, CARD_HOVER.duration + 40);
+    }, duration + 40);
   }
 
   function resetEnvelopeStage(stage, animate) {
@@ -266,6 +274,7 @@
 
     clearCardStageTimer(stage);
     const styles = stage.__offerTabsCardStageStyles;
+    const duration = getCardHoverDuration();
 
     if (!animate || reduceMotion()) {
       restoreCardStage(stage);
@@ -273,11 +282,11 @@
     }
 
     stage.style.willChange = 'top';
-    stage.style.transition = 'top ' + CARD_HOVER.duration + 'ms ' + CARD_HOVER.easing;
+    stage.style.transition = 'top ' + duration + 'ms ' + CARD_HOVER.easing;
     stage.style.top = styles.baseTop + 'px';
     stage.__offerTabsCardStageTimer = window.setTimeout(function () {
       restoreCardStage(stage);
-    }, CARD_HOVER.duration + 40);
+    }, duration + 40);
   }
 
   function clearRealCardTimer(card) {
@@ -493,8 +502,10 @@
       rememberPresentation();
       card.style.transformStyle = 'preserve-3d';
       card.style.willChange = 'transform';
-      card.style.transition = 'box-shadow ' + CARD_HOVER.duration + 'ms ' + CARD_HOVER.easing;
-      card.style.boxShadow = getHoverBoxShadow();
+      if (!isMobileOfferCardMode()) {
+        card.style.transition = 'box-shadow ' + getCardHoverDuration() + 'ms ' + CARD_HOVER.easing;
+        card.style.boxShadow = getHoverBoxShadow();
+      }
       setEnvelopeStageOffset(stage, hover.offsets.envelopeDownY, true);
       setCardStageOffset(canvas, hover.offsets.canvasOffsetY, true);
 
@@ -515,10 +526,12 @@
       hover.offsets = null;
       resetEnvelopeStage(stage, animate);
       resetCardStage(canvas, animate);
-      card.style.transition = animate && !reduceMotion()
-        ? 'box-shadow ' + CARD_HOVER.duration + 'ms ' + CARD_HOVER.easing
-        : 'none';
-      card.style.boxShadow = hover.presentation ? hover.presentation.boxShadow : '';
+      if (!isMobileOfferCardMode()) {
+        card.style.transition = animate && !reduceMotion()
+          ? 'box-shadow ' + getCardHoverDuration() + 'ms ' + CARD_HOVER.easing
+          : 'none';
+        card.style.boxShadow = hover.presentation ? hover.presentation.boxShadow : '';
+      }
 
       if (!animate || reduceMotion()) {
         hover.isEnabled = false;
