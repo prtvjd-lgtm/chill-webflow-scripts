@@ -1,0 +1,488 @@
+<!-- Пиннинг CMS-карточек приглашения друзей по скроллу -->
+
+<style>
+@media screen and (min-width: 992px) {
+  .referral-scroll-wrap.is-referral-scroll-enabled {
+    position: relative;
+    min-height: calc(225svh - 108px);
+  }
+
+  .referral-scroll-wrap.is-referral-scroll-enabled .referral-scroll {
+    position: sticky;
+    top: 24px;
+    height: calc(100svh - 48px);
+    overflow: hidden;
+    isolation: iolate;
+  }
+
+  .referral-scroll.is-referral-scroll-active .referral-scroll__intro {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    z-index: 2;
+    will-change: transform;
+  }
+
+  .referral-scroll.is-referral-scroll-active .is-referral-scroll-list-wrapper {
+    position: absolute !important;
+    inset: 0 !important;
+    display: block !important;
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .referral-scroll.is-referral-scroll-active .referral-scroll__list {
+    position: relative !important;
+    inset: auto !important;
+    display: block !important;
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  .referral-scroll.is-referral-scroll-active .is-referral-scroll-card-item {
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    margin: 0 !important;
+    will-change: transform;
+  }
+
+  .referral-scroll.is-referral-scroll-active .referral-scroll__card {
+    transform-style: preserve-3d;
+    will-change: transform;
+  }
+}
+</style>
+
+<script>
+(function () {
+  'use strict';
+
+  if (window.__chillReferralScrollStarted) return;
+  window.__chillReferralScrollStarted = true;
+
+  const BREAKPOINT = 992;
+  const HEADER_HEIGHT = 24;
+  const INTRO_FINAL_TOP = 64;
+  const CARDS_FINAL_TOP = 320;
+  const SIDE_GUTTER = 80;
+  const OFFSCREEN_GAP = 32;
+  const SCRUB_DURATION = 0.3;
+  const SCRUB_EPSILON = 0.0001;
+  const MAX_FRAME_DELTA = 0.064;
+  const PIN_HOLD_RATIO = 0.25;
+  const FIRST_CARD_PARALLAX = 1.15;
+  const ROOT_ACTIVE_CLASS = 'is-referral-scroll-enabled';
+  const STAGE_ACTIVE_CLASS = 'is-referral-scroll-active';
+  const LIST_WRAPPER_ACTIVE_CLASS = 'is-referral-scroll-list-wrapper';
+  const CARD_ITEM_ACTIVE_CLASS = 'is-referral-scroll-card-item';
+  const mediaQuery = window.matchMedia('(min-width: ' + BREAKPOINT + 'px)');
+  const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let contexts = [];
+  let isTicking = false;
+  let resizeTimer = 0;
+  let lastFrameTime = 0;
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function mapRange(value, start, end) {
+    return clamp((value - start) / (end - start), 0, 1);
+  }
+
+  function interpolate(from, to, progress) {
+    return from + (to - from) * progress;
+  }
+
+  function rememberStyle(context, element, properties) {
+    const saved = {};
+
+    properties.forEach(function (property) {
+      saved[property] = element.style.getPropertyValue(property);
+    });
+
+    context.savedStyles.set(element, saved);
+  }
+
+  function restoreStyles(context) {
+    context.savedStyles.forEach(function (saved, element) {
+      Object.keys(saved).forEach(function (property) {
+        if (saved[property]) {
+          element.style.setProperty(property, saved[property]);
+        } else {
+          element.style.removeProperty(property);
+        }
+      });
+    });
+  }
+
+  function prepareCardTilt(card) {
+    const tilt = {
+      card: card,
+      isEnabled: false,
+      maxTilt: 6.825,
+      responseCurve: 0.55,
+      smoothing: 0.1,
+      hoverRotateX: 0,
+      hoverRotateY: 0,
+      currentRotateX: 0,
+      currentRotateY: 0,
+      animationFrame: null
+    };
+
+    function shapeTilt(value) {
+      const clampedValue = Math.max(-1, Math.min(1, value));
+      return Math.sign(clampedValue) * Math.pow(Math.abs(clampedValue), tilt.responseCurve);
+    }
+
+    function renderTilt() {
+      if (!tilt.isEnabled) {
+        tilt.animationFrame = null;
+        return;
+      }
+
+      const targetRotateX = tilt.hoverRotateX;
+      const targetRotateY = tilt.hoverRotateY;
+
+      tilt.currentRotateX += (targetRotateX - tilt.currentRotateX) * tilt.smoothing;
+      tilt.currentRotateY += (targetRotateY - tilt.currentRotateY) * tilt.smoothing;
+
+      tilt.card.style.transform = 'perspective(1000px) rotateX(' +
+        tilt.currentRotateX.toFixed(3) + 'deg) rotateY(' +
+        tilt.currentRotateY.toFixed(3) + 'deg)';
+
+      if (
+        Math.abs(targetRotateX - tilt.currentRotateX) > 0.01 ||
+        Math.abs(targetRotateY - tilt.currentRotateY) > 0.01
+      ) {
+        tilt.animationFrame = window.requestAnimationFrame(renderTilt);
+      } else {
+        tilt.currentRotateX = targetRotateX;
+        tilt.currentRotateY = targetRotateY;
+        tilt.animationFrame = null;
+      }
+    }
+
+    function startTiltRender() {
+      if (!tilt.animationFrame) {
+        tilt.animationFrame = window.requestAnimationFrame(renderTilt);
+      }
+    }
+
+    tilt.startRender = startTiltRender;
+
+    card.addEventListener('mousemove', function (event) {
+      if (!tilt.isEnabled) return;
+
+      const rect = card.getBoundingClientRect();
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+
+      if (!centerX || !centerY) return;
+
+      const normalizedX = (event.clientX - rect.left - centerX) / centerX;
+      const normalizedY = (event.clientY - rect.top - centerY) / centerY;
+
+      tilt.hoverRotateY = shapeTilt(normalizedX) * tilt.maxTilt;
+      tilt.hoverRotateX = -shapeTilt(normalizedY) * tilt.maxTilt;
+      startTiltRender();
+    });
+
+    card.addEventListener('mouseleave', function () {
+      if (!tilt.isEnabled) return;
+
+      tilt.hoverRotateX = 0;
+      tilt.hoverRotateY = 0;
+      startTiltRender();
+    });
+
+    return tilt;
+  }
+
+  function enableCardTilt(tilt) {
+    tilt.isEnabled = true;
+    tilt.card.style.transformStyle = 'preserve-3d';
+    tilt.card.style.willChange = 'transform';
+  }
+
+  function disableCardTilt(tilt) {
+    tilt.isEnabled = false;
+    tilt.hoverRotateX = 0;
+    tilt.hoverRotateY = 0;
+    tilt.currentRotateX = 0;
+    tilt.currentRotateY = 0;
+
+    if (tilt.animationFrame) {
+      window.cancelAnimationFrame(tilt.animationFrame);
+      tilt.animationFrame = null;
+    }
+  }
+
+  function createContext(stage) {
+    const root = stage.closest('.referral-scroll-wrap');
+    const intro = stage.querySelector('.referral-scroll__intro');
+    const list = stage.querySelector('.referral-scroll__list');
+
+    if (!root || !intro || !list || !list.parentElement) return null;
+
+    const cards = {
+      left: list.querySelector('.referral-scroll__card[data-referral-card="bottom-first"]'),
+      center: list.querySelector('.referral-scroll__card[data-referral-card="bottom-last"]'),
+      right: list.querySelector('.referral-scroll__card[data-referral-card="top"]')
+    };
+
+    if (!cards.left || !cards.center || !cards.right) return null;
+
+    const cardItems = {
+      left: cards.left.parentElement,
+      center: cards.center.parentElement,
+      right: cards.right.parentElement
+    };
+
+    if (!cardItems.left || !cardItems.center || !cardItems.right) return null;
+
+    const context = {
+      root: root,
+      stage: stage,
+      intro: intro,
+      list: list,
+      listWrapper: list.parentElement,
+      cards: cards,
+      cardItems: cardItems,
+      tilts: {},
+      savedStyles: new Map(),
+      metrics: null,
+      targetProgress: 0,
+      visualProgress: 0,
+      isActive: false
+    };
+
+    rememberStyle(context, intro, ['transform']);
+    Object.keys(cards).forEach(function (name) {
+      rememberStyle(context, cards[name], ['transform', 'transform-style', 'will-change']);
+      rememberStyle(context, cardItems[name], ['width', 'transform']);
+      context.tilts[name] = prepareCardTilt(cards[name]);
+    });
+
+    return context;
+  }
+
+  function measure(context) {
+    const stageRect = context.stage.getBoundingClientRect();
+    const listRect = context.list.getBoundingClientRect();
+    const introRect = context.intro.getBoundingClientRect();
+    const cardMetrics = {};
+
+    if (!stageRect.width || !stageRect.height || !introRect.height) return null;
+
+    Object.keys(context.cards).forEach(function (name) {
+      const rect = context.cards[name].getBoundingClientRect();
+      cardMetrics[name] = {
+        width: rect.width,
+        height: rect.height
+      };
+    });
+
+    if (Object.keys(cardMetrics).some(function (name) {
+      return !cardMetrics[name].width || !cardMetrics[name].height;
+    })) return null;
+
+    return {
+      stageWidth: stageRect.width,
+      stageHeight: stageRect.height,
+      listOffsetX: listRect.left - stageRect.left,
+      introHeight: introRect.height,
+      cards: cardMetrics
+    };
+  }
+
+  function deactivate(context) {
+    context.isActive = false;
+    context.metrics = null;
+    context.targetProgress = 0;
+    context.visualProgress = 0;
+    context.stage.classList.remove(STAGE_ACTIVE_CLASS);
+    context.listWrapper.classList.remove(LIST_WRAPPER_ACTIVE_CLASS);
+    Object.keys(context.cardItems).forEach(function (name) {
+      disableCardTilt(context.tilts[name]);
+      context.cardItems[name].classList.remove(CARD_ITEM_ACTIVE_CLASS);
+    });
+    context.root.classList.remove(ROOT_ACTIVE_CLASS);
+    restoreStyles(context);
+  }
+
+  function activate(context) {
+    restoreStyles(context);
+    context.stage.classList.remove(STAGE_ACTIVE_CLASS);
+    context.listWrapper.classList.remove(LIST_WRAPPER_ACTIVE_CLASS);
+    Object.keys(context.cardItems).forEach(function (name) {
+      disableCardTilt(context.tilts[name]);
+      context.cardItems[name].classList.remove(CARD_ITEM_ACTIVE_CLASS);
+    });
+    context.root.classList.add(ROOT_ACTIVE_CLASS);
+
+    const metrics = measure(context);
+
+    if (!metrics) {
+      context.root.classList.remove(ROOT_ACTIVE_CLASS);
+      return;
+    }
+
+    context.metrics = metrics;
+    context.listWrapper.classList.add(LIST_WRAPPER_ACTIVE_CLASS);
+    Object.keys(context.cardItems).forEach(function (name) {
+      context.cardItems[name].classList.add(CARD_ITEM_ACTIVE_CLASS);
+      enableCardTilt(context.tilts[name]);
+    });
+    context.stage.classList.add(STAGE_ACTIVE_CLASS);
+    context.isActive = true;
+    context.targetProgress = getProgress(context);
+    context.visualProgress = context.targetProgress;
+
+    Object.keys(context.cards).forEach(function (name) {
+      context.cardItems[name].style.width = metrics.cards[name].width + 'px';
+    });
+  }
+
+  function getProgress(context) {
+    const rootTop = window.scrollY + context.root.getBoundingClientRect().top;
+    const start = rootTop - HEADER_HEIGHT;
+    const pinDistance = Math.max(1, context.root.offsetHeight - context.stage.offsetHeight);
+    const animationDistance = pinDistance / (1 + PIN_HOLD_RATIO);
+
+    return clamp((window.scrollY - start) / animationDistance, 0, 1);
+  }
+
+  function getFinalX(name, metrics) {
+    if (name === 'left') return SIDE_GUTTER - metrics.listOffsetX;
+    if (name === 'center') {
+      return (metrics.stageWidth - metrics.cards.center.width) / 2 - metrics.listOffsetX;
+    }
+
+    return metrics.stageWidth - metrics.cards.right.width - SIDE_GUTTER - metrics.listOffsetX;
+  }
+
+  function getCardProgress(name, progress) {
+    const cardProgress = name === 'center'
+      ? mapRange(progress, 0.32, 1)
+      : progress;
+
+    return name === 'left'
+      ? Math.pow(cardProgress, FIRST_CARD_PARALLAX)
+      : cardProgress;
+  }
+
+  function render(context, progress) {
+    if (!context.isActive || !context.metrics) return;
+
+    const metrics = context.metrics;
+    const introProgress = progress;
+    const introStartY = (metrics.stageHeight - metrics.introHeight) / 2;
+    const introY = interpolate(introStartY, INTRO_FINAL_TOP, introProgress);
+
+    context.intro.style.transform = 'translate3d(-50%, ' + introY + 'px, 0)';
+
+    Object.keys(context.cards).forEach(function (name) {
+      const card = context.cardItems[name];
+      const cardMetrics = metrics.cards[name];
+      const cardProgress = getCardProgress(name, progress);
+      const startY = name === 'right'
+        ? -cardMetrics.height - OFFSCREEN_GAP
+        : metrics.stageHeight + OFFSCREEN_GAP;
+      const x = getFinalX(name, metrics);
+      const y = interpolate(startY, CARDS_FINAL_TOP, cardProgress);
+
+      card.style.transform = 'translate3d(' + x + 'px, ' + y + 'px, 0)';
+    });
+  }
+
+  function animateFrame(timestamp) {
+    const delta = lastFrameTime
+      ? Math.min((timestamp - lastFrameTime) / 1000, MAX_FRAME_DELTA)
+      : 1 / 60;
+    const smoothing = 1 - Math.exp(-(Math.log(20) / SCRUB_DURATION) * delta);
+    let needsNextFrame = false;
+
+    lastFrameTime = timestamp;
+
+    contexts.forEach(function (context) {
+      if (!context.isActive) return;
+
+      context.targetProgress = getProgress(context);
+      context.visualProgress += (context.targetProgress - context.visualProgress) * smoothing;
+
+      if (Math.abs(context.targetProgress - context.visualProgress) < SCRUB_EPSILON) {
+        context.visualProgress = context.targetProgress;
+      } else {
+        needsNextFrame = true;
+      }
+
+      render(context, context.visualProgress);
+    });
+
+    if (needsNextFrame) {
+      window.requestAnimationFrame(animateFrame);
+      return;
+    }
+
+    isTicking = false;
+    lastFrameTime = 0;
+  }
+
+  function requestRender() {
+    if (isTicking) return;
+
+    isTicking = true;
+    window.requestAnimationFrame(animateFrame);
+  }
+
+  function syncContexts() {
+    const shouldAnimate = mediaQuery.matches && !reducedMotionQuery.matches;
+
+    contexts.forEach(function (context) {
+      if (shouldAnimate) {
+        activate(context);
+      } else {
+        deactivate(context);
+      }
+    });
+
+    requestRender();
+  }
+
+  function requestSync() {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(syncContexts, 100);
+  }
+
+  function init() {
+    contexts = Array.from(document.querySelectorAll('.referral-scroll'))
+      .map(createContext)
+      .filter(Boolean);
+
+    if (!contexts.length) return;
+
+    syncContexts();
+    window.addEventListener('scroll', requestRender, { passive: true });
+    window.addEventListener('resize', requestSync);
+    window.addEventListener('load', requestSync, { once: true });
+    mediaQuery.addEventListener('change', requestSync);
+    reducedMotionQuery.addEventListener('change', requestSync);
+  }
+
+  function boot() {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init, { once: true });
+    } else {
+      init();
+    }
+  }
+
+  if (window.Webflow && typeof window.Webflow.push === 'function') {
+    window.Webflow.push(boot);
+  } else {
+    boot();
+  }
+}());
+</script>

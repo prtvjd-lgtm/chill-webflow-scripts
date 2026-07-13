@@ -1,0 +1,660 @@
+<!-- Кистевая линия страницы About -->
+<style>
+  #about-scroll-brush-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 2147483646;
+    width: 0;
+    height: 0;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  .about-scroll-brush-segment {
+    position: absolute;
+    left: 0;
+    display: block;
+    overflow: hidden;
+    pointer-events: none;
+    contain: paint;
+  }
+
+  #about-scroll-brush-layer path {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+</style>
+
+<script>
+(() => {
+  if (window.__chillAboutScrollBrushStarted) return;
+  window.__chillAboutScrollBrushStarted = true;
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const START_SELECTOR = '.about-line-start';
+  const END_SELECTOR = '.about-line-end';
+  const BREAK_SELECTOR = '.about-line-break';
+  const START_OFFSET = 24;
+  const END_OFFSET = 80;
+  const BREAK_EDGE_VISIBLE = 160;
+  const RESET_SCROLL_TOP = 1;
+  const SEGMENT_HEIGHT = 640;
+  const SEGMENT_VISIBILITY_PADDING = 48;
+  const COLOR = '#FF996B';
+  const LAYER_ID = 'about-scroll-brush-layer';
+  const SCRUB_DURATION = 0.6;
+  const SCRUB_EPSILON = 0.15;
+  const MAX_FRAME_DELTA = 0.064;
+  const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const BRUSH_SCALE = 1.4;
+  const BRUSH = {
+    mainWidth: 2.25 * BRUSH_SCALE,
+    secondWidth: 0.75 * BRUSH_SCALE,
+    dryWidth: 1.5 * BRUSH_SCALE,
+    scratchWidth: 1.2 * BRUSH_SCALE,
+    bristleLength: 44 * BRUSH_SCALE,
+    bristleSpread: 1.9 * BRUSH_SCALE * 2,
+    bristleWidth: 0.525 * BRUSH_SCALE,
+    maskWidth: 9.75 * BRUSH_SCALE,
+    cutLength: 11 * BRUSH_SCALE,
+    cutWidth: 5.55 * BRUSH_SCALE,
+    filterScale: 3.7 * BRUSH_SCALE
+  };
+  const CURVE = [
+    [0, 0.52],
+    [0.1, 0.53],
+    [0.19, 0.48],
+    [0.31, 0.32],
+    [0.4, 0.3],
+    [0.5, 0.4],
+    [0.6, 0.6],
+    [0.69, 0.65],
+    [0.8, 0.53],
+    [0.9, 0.45],
+    [1, 0.47]
+  ];
+
+  let layer;
+  let segments = [];
+  let lineStart = 0;
+  let lineEnd = 0;
+  let totalLength = 0;
+  let currentRevealLength = 0;
+  let targetRevealLength = 0;
+  let hasUserScrolled = false;
+  let scrollFrame;
+  let followFrame;
+  let lastFollowTime = 0;
+  let layoutFrame;
+  let breakMaskFrame;
+  let observer;
+  let renderId = 0;
+
+  function svgElement(name, attributes) {
+    const element = document.createElementNS(SVG_NS, name);
+
+    Object.keys(attributes || {}).forEach((key) => {
+      element.setAttribute(key, attributes[key]);
+    });
+
+    return element;
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function round(value) {
+    return Math.round(value * 100) / 100;
+  }
+
+  function randomFromSeed(seed) {
+    return () => {
+      seed |= 0;
+      seed = seed + 0x6d2b79f5 | 0;
+
+      let value = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      value = value + Math.imul(value ^ value >>> 7, 61 | value) ^ value;
+
+      return ((value ^ value >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function getDocumentY(rect) {
+    return rect.top + window.scrollY;
+  }
+
+  function getCurveX(progress) {
+    const value = clamp(progress, 0, 1);
+    let index = CURVE.length - 2;
+
+    for (let current = 0; current < CURVE.length - 1; current += 1) {
+      if (value <= CURVE[current + 1][0]) {
+        index = current;
+        break;
+      }
+    }
+
+    const start = CURVE[index];
+    const end = CURVE[index + 1];
+    const local = (value - start[0]) / Math.max(0.0001, end[0] - start[0]);
+    const p0 = CURVE[Math.max(0, index - 1)][1];
+    const p1 = start[1];
+    const p2 = end[1];
+    const p3 = CURVE[Math.min(CURVE.length - 1, index + 2)][1];
+    const local2 = local * local;
+    const local3 = local2 * local;
+
+    return 0.5 * (
+      2 * p1 +
+      (-p0 + p2) * local +
+      (2 * p0 - 5 * p1 + 4 * p2 - p3) * local2 +
+      (-p0 + 3 * p1 - 3 * p2 + p3) * local3
+    );
+  }
+
+  function getVariantOffset(progress, variant) {
+    if (variant === 0) return { x: 0, y: 0 };
+
+    return {
+      x:
+        Math.sin(progress * 131.7 + variant * 2.7) * variant * 1.45 +
+        Math.sin(progress * 331.1 + variant * 7.9) * 1.2,
+      y: Math.sin(progress * 223.4 + variant * 4.1) * 0.9
+    };
+  }
+
+  function createSegmentPath(width, top, bottom, variant) {
+    const height = bottom - top;
+    const count = Math.max(8, Math.ceil(height / 14));
+    const span = Math.max(1, lineEnd - lineStart);
+    const points = [];
+    let minX = Infinity;
+    let maxX = -Infinity;
+
+    for (let index = 0; index <= count; index += 1) {
+      const y = top + height * index / count;
+      const progress = clamp((y - lineStart) / span, 0, 1);
+      const offset = getVariantOffset(progress, variant);
+      const x = width * getCurveX(progress) + offset.x;
+
+      points.push({ x: x, y: y - top + offset.y });
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+    }
+
+    return {
+      d: points.map((point, index) =>
+        (index === 0 ? 'M ' : ' L ') + round(point.x) + ' ' + round(point.y)
+      ).join(''),
+      minX: minX,
+      maxX: maxX
+    };
+  }
+
+  function appendStroke(group, path, className, width, dash) {
+    const stroke = svgElement('path', {
+      class: className,
+      d: path,
+      stroke: COLOR,
+      'stroke-width': width,
+      'stroke-opacity': '1'
+    });
+
+    if (dash) {
+      stroke.setAttribute('stroke-dasharray', dash.values);
+      stroke.setAttribute('stroke-dashoffset', dash.offset);
+    }
+
+    group.appendChild(stroke);
+  }
+
+  function appendBristles(group, pathNode) {
+    const length = pathNode.getTotalLength();
+    const count = clamp(Math.round(length / 38), 3, 54);
+    const random = randomFromSeed(Math.round(length * 17) + 12987);
+
+    for (let index = 0; index < count; index += 1) {
+      const at = random() * length;
+      const before = pathNode.getPointAtLength(Math.max(0, at - 1));
+      const point = pathNode.getPointAtLength(at);
+      const after = pathNode.getPointAtLength(Math.min(length, at + 1));
+      const tangentX = after.x - before.x;
+      const tangentY = after.y - before.y;
+      const tangentLength = Math.max(0.001, Math.hypot(tangentX, tangentY));
+      const normalX = -tangentY / tangentLength;
+      const normalY = tangentX / tangentLength;
+      const direction = random() > 0.5 ? 1 : -1;
+      const bristleLength = BRUSH.bristleLength * (0.35 + random() * 0.9);
+      const shift = (random() - 0.5) * bristleLength * 0.35;
+      const spread = (random() - 0.5) * BRUSH.bristleSpread;
+      const x1 = point.x + normalX * spread + tangentX / tangentLength * shift;
+      const y1 = point.y + normalY * spread + tangentY / tangentLength * shift;
+      const x2 = x1 + tangentX / tangentLength * bristleLength * direction + normalX * (random() - 0.5) * BRUSH.bristleSpread;
+      const y2 = y1 + tangentY / tangentLength * bristleLength * direction + normalY * (random() - 0.5) * BRUSH.bristleSpread;
+
+      group.appendChild(svgElement('path', {
+        d: 'M ' + round(x1) + ' ' + round(y1) + ' L ' + round(x2) + ' ' + round(y2),
+        stroke: COLOR,
+        'stroke-width': BRUSH.bristleWidth,
+        'stroke-opacity': round(0.45 + random() * 0.55)
+      }));
+    }
+  }
+
+  function appendTextureCuts(mask, pathNode) {
+    const length = pathNode.getTotalLength();
+    const count = clamp(Math.round(length / 90), 3, 38);
+    const random = randomFromSeed(Math.round(length * 23) + 17096);
+
+    for (let index = 0; index < count; index += 1) {
+      const at = random() * length;
+      const before = pathNode.getPointAtLength(Math.max(0, at - 1));
+      const point = pathNode.getPointAtLength(at);
+      const after = pathNode.getPointAtLength(Math.min(length, at + 1));
+      const tangentX = after.x - before.x;
+      const tangentY = after.y - before.y;
+      const tangentLength = Math.max(0.001, Math.hypot(tangentX, tangentY));
+      const normalX = -tangentY / tangentLength;
+      const normalY = tangentX / tangentLength;
+      const direction = random() > 0.5 ? 1 : -1;
+      const cutLength = BRUSH.cutLength * (0.45 + random() * 1.1);
+      const x1 = point.x;
+      const y1 = point.y;
+      const x2 = x1 + tangentX / tangentLength * cutLength * direction + normalX * (random() - 0.5) * 1.2;
+      const y2 = y1 + tangentY / tangentLength * cutLength * direction + normalY * (random() - 0.5) * 1.2;
+
+      mask.appendChild(svgElement('path', {
+        d: 'M ' + round(x1) + ' ' + round(y1) + ' L ' + round(x2) + ' ' + round(y2),
+        stroke: '#000',
+        'stroke-width': round(BRUSH.cutWidth * (0.65 + random() * 0.7)),
+        'stroke-opacity': '0.32'
+      }));
+    }
+  }
+
+  function appendBreakHoles(mask, top, bottom) {
+    document.querySelectorAll(BREAK_SELECTOR).forEach((element) => {
+      const rect = element.getBoundingClientRect();
+      const breakTop = getDocumentY(rect) + BREAK_EDGE_VISIBLE;
+      const breakBottom = getDocumentY(rect) + rect.height - BREAK_EDGE_VISIBLE;
+      const visibleTop = Math.max(top, breakTop);
+      const visibleBottom = Math.min(bottom, breakBottom);
+
+      if (rect.width <= 0 || visibleBottom <= visibleTop) return;
+
+      mask.appendChild(svgElement('rect', {
+        x: round(rect.left + window.scrollX),
+        y: round(visibleTop - top),
+        width: round(rect.width),
+        height: round(visibleBottom - visibleTop),
+        fill: '#000'
+      }));
+    });
+  }
+
+  function createFilter(id, width, height, bounds) {
+    const margin = 56;
+    const filter = svgElement('filter', {
+      id: id,
+      filterUnits: 'userSpaceOnUse',
+      primitiveUnits: 'userSpaceOnUse',
+      x: round(Math.max(-margin, bounds.minX - margin)),
+      y: -margin,
+      width: round(Math.min(width + margin * 2, bounds.maxX - bounds.minX + margin * 2)),
+      height: round(height + margin * 2),
+      'color-interpolation-filters': 'sRGB'
+    });
+
+    filter.appendChild(svgElement('feTurbulence', {
+      type: 'fractalNoise',
+      baseFrequency: '0.08 0.18',
+      numOctaves: '7',
+      seed: '999',
+      result: 'noise'
+    }));
+    filter.appendChild(svgElement('feDisplacementMap', {
+      in: 'SourceGraphic',
+      in2: 'noise',
+      scale: BRUSH.filterScale,
+      xChannelSelector: 'R',
+      yChannelSelector: 'G'
+    }));
+
+    return filter;
+  }
+
+  function createSegment(index, top, bottom, width, uid) {
+    const height = bottom - top;
+    const base = createSegmentPath(width, top, bottom, 0);
+    const second = createSegmentPath(width, top, bottom, 1);
+    const dry = createSegmentPath(width, top, bottom, 2);
+    const scratch = createSegmentPath(width, top, bottom, 3);
+    const svg = svgElement('svg', {
+      class: 'about-scroll-brush-segment',
+      'aria-hidden': 'true',
+      focusable: 'false',
+      width: width,
+      height: height,
+      viewBox: '0 0 ' + width + ' ' + height,
+      preserveAspectRatio: 'none'
+    });
+    const maskId = 'about-scroll-brush-mask-' + uid + '-' + index;
+    const filterId = 'about-scroll-brush-filter-' + uid + '-' + index;
+    const defs = svgElement('defs');
+    const mask = svgElement('mask', {
+      id: maskId,
+      maskUnits: 'userSpaceOnUse',
+      maskContentUnits: 'userSpaceOnUse',
+      x: '0',
+      y: '0',
+      width: width,
+      height: height,
+      'mask-type': 'luminance'
+    });
+
+    svg.style.top = round(top) + 'px';
+    svg.style.width = width + 'px';
+    svg.style.height = height + 'px';
+    svg.style.display = 'none';
+
+    mask.appendChild(svgElement('rect', {
+      x: '0',
+      y: '0',
+      width: width,
+      height: height,
+      fill: '#000'
+    }));
+
+    const revealPath = svgElement('path', {
+      d: base.d,
+      stroke: '#fff',
+      'stroke-width': BRUSH.maskWidth,
+      'stroke-linecap': 'butt'
+    });
+    const breakMask = svgElement('g');
+
+    mask.appendChild(revealPath);
+    appendBreakHoles(breakMask, top, bottom);
+    mask.appendChild(breakMask);
+    defs.appendChild(createFilter(filterId, width, height, base));
+    defs.appendChild(mask);
+    svg.appendChild(defs);
+
+    const lines = svgElement('g', {
+      mask: 'url(#' + maskId + ')',
+      filter: 'url(#' + filterId + ')'
+    });
+
+    svg.appendChild(lines);
+    layer.appendChild(svg);
+
+    appendTextureCuts(mask, revealPath);
+    appendStroke(lines, second.d, 'about-brush-second', BRUSH.secondWidth, {
+      values: '51 8.8 15.3 6.6 27.2 11',
+      offset: String(27 + index * 13)
+    });
+    appendStroke(lines, base.d, 'about-brush-main', BRUSH.mainWidth);
+    appendStroke(lines, dry.d, 'about-brush-dry', BRUSH.dryWidth, {
+      values: '5.1 19.8 30.6 13.2 3.4 24.2',
+      offset: String(54 + index * 17)
+    });
+    appendStroke(lines, scratch.d, 'about-brush-scratch', BRUSH.scratchWidth, {
+      values: '1.7 26.4 17 17.6 6.8 30.8',
+      offset: String(81 + index * 19)
+    });
+    appendBristles(lines, revealPath);
+
+    const length = revealPath.getTotalLength();
+    revealPath.setAttribute('stroke-dasharray', length + ' ' + length);
+    revealPath.setAttribute('stroke-dashoffset', length);
+
+    return {
+      svg: svg,
+      revealPath: revealPath,
+      breakMask: breakMask,
+      top: top,
+      bottom: bottom,
+      length: length,
+      startLength: 0,
+      visibleLength: 0
+    };
+  }
+
+  function findLengthAtY(path, pathLength, y) {
+    let low = 0;
+    let high = pathLength;
+
+    for (let index = 0; index < 20; index += 1) {
+      const middle = (low + high) / 2;
+
+      if (path.getPointAtLength(middle).y < y) {
+        low = middle;
+      } else {
+        high = middle;
+      }
+    }
+
+    return (low + high) / 2;
+  }
+
+  function getTargetRevealLength() {
+    if (!hasUserScrolled || window.scrollY <= RESET_SCROLL_TOP) return 0;
+
+    const targetY = window.scrollY + window.innerHeight / 2;
+
+    if (targetY <= lineStart) return 0;
+    if (targetY >= lineEnd) return totalLength;
+
+    const segment = segments.find((item) => targetY >= item.top && targetY < item.bottom);
+    if (!segment) return 0;
+
+    return segment.startLength + findLengthAtY(
+      segment.revealPath,
+      segment.length,
+      targetY - segment.top
+    );
+  }
+
+  function updateSegmentVisibility() {
+    const hasVisibleLine = currentRevealLength > SCRUB_EPSILON || targetRevealLength > SCRUB_EPSILON;
+    const top = window.scrollY - SEGMENT_VISIBILITY_PADDING;
+    const bottom = window.scrollY + window.innerHeight + SEGMENT_VISIBILITY_PADDING;
+
+    segments.forEach((segment) => {
+      const isVisible = hasVisibleLine && segment.bottom > top && segment.top < bottom;
+      segment.svg.style.display = isVisible ? 'block' : 'none';
+    });
+  }
+
+  function applyReveal() {
+    const visibleLength = clamp(currentRevealLength, 0, totalLength);
+
+    segments.forEach((segment) => {
+      const localLength = clamp(
+        visibleLength - segment.startLength,
+        0,
+        segment.length
+      );
+
+      if (Math.abs(localLength - segment.visibleLength) > 0.01) {
+        segment.visibleLength = localLength;
+        segment.revealPath.setAttribute(
+          'stroke-dashoffset',
+          round(segment.length - localLength)
+        );
+      }
+    });
+
+    updateSegmentVisibility();
+  }
+
+  function followReveal(timestamp) {
+    const delta = lastFollowTime
+      ? Math.min((timestamp - lastFollowTime) / 1000, MAX_FRAME_DELTA)
+      : 1 / 60;
+    const smoothing = 1 - Math.exp(-(Math.log(20) / SCRUB_DURATION) * delta);
+
+    lastFollowTime = timestamp;
+    currentRevealLength += (targetRevealLength - currentRevealLength) * smoothing;
+
+    if (Math.abs(targetRevealLength - currentRevealLength) < SCRUB_EPSILON) {
+      currentRevealLength = targetRevealLength;
+      followFrame = undefined;
+      lastFollowTime = 0;
+    } else {
+      followFrame = window.requestAnimationFrame(followReveal);
+    }
+
+    applyReveal();
+  }
+
+  function updateReveal(immediate) {
+    targetRevealLength = getTargetRevealLength();
+    const shouldReset = window.scrollY <= RESET_SCROLL_TOP;
+
+    if (immediate || REDUCED_MOTION.matches || shouldReset) {
+      if (followFrame) window.cancelAnimationFrame(followFrame);
+      followFrame = undefined;
+      lastFollowTime = 0;
+      currentRevealLength = targetRevealLength;
+      applyReveal();
+      return;
+    }
+
+    if (Math.abs(targetRevealLength - currentRevealLength) < SCRUB_EPSILON) {
+      currentRevealLength = targetRevealLength;
+      applyReveal();
+      return;
+    }
+
+    if (!followFrame) {
+      followFrame = window.requestAnimationFrame(followReveal);
+    }
+  }
+
+  function scheduleReveal() {
+    hasUserScrolled = true;
+    if (scrollFrame) return;
+
+    scrollFrame = window.requestAnimationFrame(() => {
+      scrollFrame = undefined;
+      updateReveal(false);
+    });
+  }
+
+  function refreshBreakMasks() {
+    segments.forEach((segment) => {
+      segment.breakMask.replaceChildren();
+      appendBreakHoles(segment.breakMask, segment.top, segment.bottom);
+    });
+  }
+
+  function scheduleBreakMaskRefresh() {
+    if (breakMaskFrame) return;
+
+    breakMaskFrame = window.requestAnimationFrame(() => {
+      breakMaskFrame = undefined;
+      refreshBreakMasks();
+    });
+  }
+
+  function observeBreaks() {
+    if (!window.ResizeObserver) return;
+    if (observer) observer.disconnect();
+
+    observer = new ResizeObserver(scheduleBreakMaskRefresh);
+    document.querySelectorAll(BREAK_SELECTOR).forEach((element) => observer.observe(element));
+  }
+
+  function rebuild() {
+    const startElement = document.querySelector(START_SELECTOR);
+    const endElement = document.querySelector(END_SELECTOR);
+    const previousProgress = totalLength > 0
+      ? clamp(currentRevealLength / totalLength, 0, 1)
+      : 0;
+
+    if (!startElement || !endElement) {
+      layer.style.display = 'none';
+      return;
+    }
+
+    const startRect = startElement.getBoundingClientRect();
+    const endRect = endElement.getBoundingClientRect();
+    lineStart = getDocumentY(startRect) + startRect.height + START_OFFSET;
+    lineEnd = getDocumentY(endRect) - END_OFFSET;
+
+    if (lineEnd <= lineStart) {
+      layer.style.display = 'none';
+      return;
+    }
+
+    const width = window.innerWidth;
+    const uid = ++renderId;
+
+    layer.style.display = 'block';
+    layer.replaceChildren();
+    segments = [];
+    totalLength = 0;
+
+    for (let top = lineStart, index = 0; top < lineEnd; top += SEGMENT_HEIGHT, index += 1) {
+      const bottom = Math.min(lineEnd, top + SEGMENT_HEIGHT);
+      const segment = createSegment(index, top, bottom, width, uid);
+
+      segment.startLength = totalLength;
+      totalLength += segment.length;
+      segments.push(segment);
+    }
+
+    observeBreaks();
+
+    if (!hasUserScrolled) {
+      currentRevealLength = 0;
+      targetRevealLength = 0;
+      applyReveal();
+      return;
+    }
+
+    currentRevealLength = previousProgress * totalLength;
+    updateReveal(false);
+  }
+
+  function scheduleLayout() {
+    if (layoutFrame) return;
+
+    layoutFrame = window.requestAnimationFrame(() => {
+      layoutFrame = undefined;
+      rebuild();
+    });
+  }
+
+  function init() {
+    const existing = document.getElementById(LAYER_ID);
+    if (existing) existing.remove();
+
+    layer = document.createElement('div');
+    layer.id = LAYER_ID;
+    layer.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(layer);
+
+    rebuild();
+    window.addEventListener('scroll', scheduleReveal, { passive: true });
+    window.addEventListener('resize', scheduleLayout, { passive: true });
+    window.addEventListener('orientationchange', scheduleLayout, { passive: true });
+    window.addEventListener('load', scheduleLayout, { once: true });
+
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(scheduleLayout);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
+})();
+</script>

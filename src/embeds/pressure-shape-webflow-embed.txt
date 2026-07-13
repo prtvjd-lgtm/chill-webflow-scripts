@@ -1,0 +1,1630 @@
+<!-- pressure-shape-webflow-embed -->
+
+<style>
+  .pressure-shape-stage {
+    position: relative;
+  }
+
+  .pressure-shape-mask {
+    opacity: 0;
+    overflow: hidden;
+    transform-origin: 50% 50%;
+    will-change: clip-path, opacity;
+  }
+
+  .pressure-shape-photo-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    transform-origin: 50% 50%;
+    will-change: transform, opacity;
+  }
+
+  .pressure-shape-slide {
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .pressure-shape-slide.is-pressure-active {
+    visibility: visible;
+  }
+
+  .pressure-shape-item {
+    position: absolute;
+    left: 0;
+    top: 0;
+    opacity: 0;
+    transform-origin: 50% 50%;
+    will-change: transform, opacity;
+  }
+
+  .pressure-shape-item > * {
+    will-change: transform, opacity;
+  }
+</style>
+
+<script>
+  (function () {
+    var CONFIG = {
+      stageSelector: '.pressure-shape-stage',
+      maskSelector: '.pressure-shape-mask',
+      slideSelector: '.pressure-shape-slide',
+      itemSelector: '.pressure-shape-item',
+      points: 170,
+      pressureRadius: 240,
+      deformationSpread: 1.5,
+      maxDent: 23,
+      cursorPressureEnabled: true,
+      cursorPressureRadius: 162,
+      cursorPressureStrength: 1.35,
+      cursorPressureZone: 12,
+      tabletMaxWidth: 991,
+      mobileLandscapeMaxWidth: 767,
+      mobilePortraitMaxWidth: 479,
+      compactMotionScale: 0.5,
+      itemViewportPadding: 16,
+      itemCollisionGap: 16,
+      constraintMaxViewportWidth: 1280,
+      layoutDentEase: 0.16,
+      layoutDentClearance: 12,
+      layoutDentMax: 260,
+      layoutDentMinZone: 12,
+      layoutDentMaxZone: 52,
+      microEase: 0.08,
+      pressureTransitionDuration: 2200,
+      smoothPasses: 2,
+      speedMultiplier: 160 / 75,
+      pulseSpeed: 0.75,
+      pulseMin: 0.35,
+      pulseMax: 1.1,
+      flowAmount: 0.08,
+      ambientDent: 16,
+      ambientSpeed: 1.4,
+      slideHoldDuration: 4000,
+      slideTransition: 3600,
+      slideShapeStrength: 88,
+      itemRevealDuration: 950,
+      itemRevealDelay: 220,
+      itemRevealOffset: 12,
+      lineRevealDelay: 180,
+      itemExitDuration: 665,
+      itemExitDelay: 154,
+      itemExitOffset: 12,
+      lineExitDelay: 126,
+      slideEnterGap: 180,
+      maxLocalZone: 0.24,
+      pressureScale: 1,
+      followStrength: 0.7,
+      followScale: 0.95,
+      nestStrength: 0.32,
+      itemGap: 47,
+      globalMotion: 0.12,
+      globalMoveX: 14,
+      globalMoveY: 18,
+      respectReducedMotion: true,
+      introEnabled: true,
+      introScale: 0.8,
+      introDuration: 1400,
+      introScaleDuration: 1400,
+      introPhotoScale: 1.2,
+      initialRevealProgress: 0.4,
+      pathD: 'M16.1953 484.712C-35.3047 349.712 48.1953 227.212 96.6996 108.713C124.753 40.178 170.835 -31.3315 285.968 14.483C404.202 49.7126 428.424 78.3059 461.697 117.213C523.7 189.713 545.698 179.212 569.696 399.212C575.94 456.455 589.597 515.465 612.204 553.213C671.195 651.712 625.768 738.727 612.203 791.713C598.637 844.7 484.042 942.999 442.937 966.747C401.833 990.495 339.938 970.578 295.2 934.213C250.461 897.848 244.695 847.712 172.695 806.212C6.82711 710.607 87.8009 672.416 16.1953 484.712Z'
+    };
+
+    var ITEM_DEFAULTS = {
+      chill: { x: 18, y: 28, pressure: 1.2, follow: 0.7, speed: 0.68 },
+      heal: { x: 16, y: 60, pressure: 1.25, follow: 0.76, speed: 0.88 },
+      and: { x: 95, y: 50, pressure: 1.35, follow: 0.72, speed: 0.57 }
+    };
+
+    function onReady(fn) {
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', fn);
+      } else {
+        fn();
+      }
+    }
+
+    onReady(function () {
+      var points = samplePath(CONFIG.pathD, CONFIG.points);
+      var stages = Array.prototype.slice.call(document.querySelectorAll(CONFIG.stageSelector));
+
+      stages.forEach(function (stage) {
+        initPressureShape(stage, points);
+      });
+    });
+
+    function initPressureShape(stage, points) {
+      var mask = stage.querySelector(CONFIG.maskSelector);
+      var realSlides = Array.prototype.slice.call(stage.querySelectorAll(CONFIG.slideSelector));
+      var hasSlides = realSlides.length > 0;
+      var slides = hasSlides ? realSlides : [stage];
+      var layout = getResponsiveLayout(window.innerWidth);
+
+      if (!mask) return;
+
+      if (window.getComputedStyle(stage).position === 'static') {
+        stage.style.position = 'relative';
+      }
+
+      var reduceMotion =
+        CONFIG.respectReducedMotion &&
+        window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      var state = {
+        activeSlideIndex: 0,
+        previousSlideIndex: 0,
+        transitionStart: null,
+        nextSwitchTime: 0,
+        initialRevealPending: true,
+        anchorsReady: false,
+        lastRectWidth: 0,
+        lastRectHeight: 0,
+        movers: [],
+        pressureMovers: [],
+        cursor: {
+          active: false,
+          x: 0,
+          y: 0
+        },
+        exitingMovers: [],
+        exitingSlides: [],
+        pendingSlideIndex: null,
+        pendingSlideStart: 0,
+        layout: layout,
+        profiles: slides.map(function (slide, index) {
+          return buildSlideProfile(index, points, slide, layout);
+        })
+      };
+
+      var microDents = points.map(function () { return 0; });
+      var layoutDents = points.map(function () { return 0; });
+
+      prepareSlides(slides, hasSlides);
+      showSlide(slides[0], hasSlides);
+
+      bindCursorPressure(stage, state);
+      startMaskIntro(mask, reduceMotion);
+      requestAnimationFrame(frame);
+
+      function frame(time) {
+        var rect = mask.getBoundingClientRect();
+        var stageRect = stage.getBoundingClientRect();
+
+        if (rect.width <= 0 || rect.height <= 0) {
+          requestAnimationFrame(frame);
+          return;
+        }
+
+        var nextLayout = getResponsiveLayout(window.innerWidth);
+
+        if (nextLayout.key !== state.layout.key) {
+          applyResponsiveLayout(state, slides, points, nextLayout);
+        }
+
+        var introScale = getIntroShapeScale(mask, time, reduceMotion);
+
+        startInitialSlide(state, slides[0], mask, time, reduceMotion);
+        maybeStartSlideTransition(state, slides, hasSlides, time, reduceMotion);
+        var visualMovers = getVisualMovers(state);
+        var pressureMovers = updatePressureMovers(state, time, reduceMotion);
+        var geometryMovers = getGeometryMovers(visualMovers, pressureMovers);
+
+        if (
+          !state.anchorsReady ||
+          Math.abs(rect.width - state.lastRectWidth) > 1 ||
+          Math.abs(rect.height - state.lastRectHeight) > 1
+        ) {
+          syncAnchors(geometryMovers, points, rect);
+          state.anchorsReady = true;
+          state.lastRectWidth = rect.width;
+          state.lastRectHeight = rect.height;
+        }
+
+        var t = reduceMotion ? 0 : time / 1000 * CONFIG.speedMultiplier;
+        var zoneSize = getContourZoneSize(points.length);
+        var slideProfile = getSlideProfile(state, time, reduceMotion);
+        var cursorPressure = getCursorPressure(state, points, rect, reduceMotion);
+
+        geometryMovers.forEach(function (mover) {
+          mover.flowIndex = getFlowIndex(mover, t, zoneSize, points.length, reduceMotion);
+        });
+
+        var microTarget = points.map(function (point, pointIndex) {
+          var dent = getAmbientDent(pointIndex, points.length, t, reduceMotion, state.layout.ambientScale);
+
+          pressureMovers.forEach(function (mover) {
+            if (mover.pressureWeight <= 0) return;
+
+            var distance = circularIndexDistance(pointIndex, mover.flowIndex, points.length);
+
+            if (distance > zoneSize) return;
+
+            var k = 1 - distance / zoneSize;
+            var localFalloff = k * k * (3 - 2 * k);
+            var pulseMin = Math.min(CONFIG.pulseMin, CONFIG.pulseMax);
+            var pulseMax = Math.max(CONFIG.pulseMin, CONFIG.pulseMax);
+            var pulse = reduceMotion
+              ? (pulseMin + pulseMax) / 2
+              : pulseMin + (pulseMax - pulseMin) * ((Math.sin(t * mover.speed + mover.phase) + 1) / 2);
+
+            dent += CONFIG.maxDent * localFalloff * pulse * mover.pressure * state.layout.pressureScale * mover.pressureWeight;
+          });
+
+          if (cursorPressure) {
+            var cursorDistance = circularIndexDistance(pointIndex, cursorPressure.index, points.length);
+
+            if (cursorDistance <= CONFIG.cursorPressureZone) {
+              var cursorK = 1 - cursorDistance / CONFIG.cursorPressureZone;
+              var cursorFalloff = cursorK * cursorK * (3 - 2 * cursorK);
+
+              dent += CONFIG.maxDent * cursorFalloff * cursorPressure.strength * state.layout.pressureScale;
+            }
+          }
+
+          return dent;
+        });
+
+        for (var i = 0; i < CONFIG.smoothPasses; i++) {
+          microTarget = smoothCircular(microTarget);
+        }
+
+        microDents = reduceMotion
+          ? microTarget
+          : microDents.map(function (current, index) {
+              return current + (microTarget[index] - current) * CONFIG.microEase;
+            });
+
+        var globalMotion = getGlobalMotion(t, state.layout.globalMotionScale);
+        var baseDents = microDents.map(function (microDent, index) {
+          return slideProfile[index] + microDent;
+        });
+        var baseDeformedPoints = getDeformedPoints(
+          points,
+          baseDents,
+          rect.width,
+          rect.height,
+          globalMotion,
+          introScale
+        );
+        var constraintPlacements = getResponsiveConstraintPlacements(
+          visualMovers,
+          points,
+          baseDeformedPoints,
+          rect,
+          stageRect,
+          globalMotion
+        );
+        var layoutTarget = getLayoutDentTarget(
+          constraintPlacements,
+          points,
+          baseDeformedPoints,
+          rect,
+          stageRect
+        );
+
+        layoutDents = reduceMotion
+          ? layoutTarget
+          : layoutDents.map(function (current, index) {
+              return current + (layoutTarget[index] - current) * CONFIG.layoutDentEase;
+            });
+
+        var dents = baseDents.map(function (baseDent, index) {
+          return Math.min(
+            baseDent + layoutDents[index],
+            getMaxSafeDent(points[index], rect.width, rect.height, introScale)
+          );
+        });
+        var deformedPoints = applyMask(mask, points, dents, rect.width, rect.height, globalMotion, introScale);
+        moveItemsFromShape(
+          visualMovers,
+          points,
+          deformedPoints,
+          rect,
+          stageRect,
+          globalMotion,
+          time,
+          reduceMotion,
+          constraintPlacements
+        );
+        cleanupExitingSlides(state, hasSlides, time);
+        requestAnimationFrame(frame);
+      }
+
+      function maybeStartSlideTransition(sliderState, slideList, slidesEnabled, time, reduceMotionActive) {
+        if (reduceMotionActive || slideList.length < 2) return;
+
+        if (sliderState.nextSwitchTime === 0) {
+          sliderState.nextSwitchTime = time + CONFIG.slideHoldDuration;
+          return;
+        }
+
+        if (sliderState.pendingSlideIndex !== null) {
+          if (time < sliderState.pendingSlideStart) return;
+
+          var currentIndex = sliderState.activeSlideIndex;
+          var pendingIndex = sliderState.pendingSlideIndex;
+          var pendingSlide = slideList[pendingIndex];
+
+          showSlide(pendingSlide, slidesEnabled);
+
+          sliderState.previousSlideIndex = currentIndex;
+          sliderState.activeSlideIndex = pendingIndex;
+          sliderState.transitionStart = time;
+          sliderState.nextSwitchTime = time + CONFIG.slideHoldDuration + CONFIG.slideTransition;
+          var incomingMovers = buildMovers(pendingSlide, time, false, 'in', sliderState.layout);
+
+          transitionPressureMovers(incomingMovers, time, 1, 0);
+          sliderState.movers = incomingMovers;
+          sliderState.pressureMovers = sliderState.pressureMovers.concat(incomingMovers);
+          sliderState.pendingSlideIndex = null;
+          sliderState.pendingSlideStart = 0;
+          sliderState.anchorsReady = false;
+          return;
+        }
+
+        if (sliderState.transitionStart !== null || time < sliderState.nextSwitchTime) return;
+
+        var previousIndex = sliderState.activeSlideIndex;
+        var nextIndex = (previousIndex + 1) % slideList.length;
+        var previousSlide = slideList[previousIndex];
+        var exitDuration = getSlideExitDuration(previousSlide);
+
+        sliderState.exitingMovers = sliderState.exitingMovers.concat(buildMovers(previousSlide, time, false, 'out', sliderState.layout));
+        sliderState.exitingSlides.push({
+          slide: previousSlide,
+          hideAt: time + exitDuration
+        });
+        transitionPressureMovers(sliderState.pressureMovers, time, 0);
+        sliderState.movers = [];
+        sliderState.pendingSlideIndex = nextIndex;
+        sliderState.pendingSlideStart = time + exitDuration + CONFIG.slideEnterGap;
+        sliderState.anchorsReady = false;
+      }
+    }
+
+    function getVisualMovers(state) {
+      return state.movers.concat(state.exitingMovers);
+    }
+
+    function startInitialSlide(state, slide, mask, time, reduceMotion) {
+      if (!state.initialRevealPending) return;
+
+      var intro = mask.__pressureIntro;
+
+      if (
+        !reduceMotion &&
+        intro &&
+        intro.startedAt !== null &&
+        time < intro.startedAt + CONFIG.introScaleDuration * CONFIG.initialRevealProgress
+      ) {
+        return;
+      }
+
+      state.movers = buildMovers(slide, time, false, 'in', state.layout);
+      transitionPressureMovers(state.movers, time, 1, 0);
+      state.pressureMovers = state.movers.slice();
+      state.initialRevealPending = false;
+      state.anchorsReady = false;
+    }
+
+    function applyResponsiveLayout(state, slides, points, layout) {
+      var updatedMovers = [];
+
+      state.layout = layout;
+      state.profiles = slides.map(function (slide, index) {
+        return buildSlideProfile(index, points, slide, layout);
+      });
+
+      state.movers.concat(state.pressureMovers, state.exitingMovers).forEach(function (mover) {
+        if (updatedMovers.indexOf(mover) !== -1) return;
+
+        var anchor = getResponsiveAnchor(mover.el, mover.itemIndex, mover.itemTotal, layout);
+
+        mover.anchorTargetX = anchor.x / 100;
+        mover.anchorTargetY = anchor.y / 100;
+        mover.placement = null;
+        updatedMovers.push(mover);
+      });
+
+      state.anchorsReady = false;
+    }
+
+    function getGeometryMovers(visualMovers, pressureMovers) {
+      var movers = visualMovers.slice();
+
+      pressureMovers.forEach(function (mover) {
+        if (movers.indexOf(mover) === -1) movers.push(mover);
+      });
+
+      return movers;
+    }
+
+    function transitionPressureMovers(movers, time, target, initialWeight) {
+      movers.forEach(function (mover) {
+        var from = typeof initialWeight === 'number'
+          ? initialWeight
+          : getPressureWeight(mover, time, false);
+
+        mover.pressureWeight = from;
+        mover.pressureTransition = {
+          from: from,
+          target: target,
+          startedAt: time
+        };
+      });
+    }
+
+    function updatePressureMovers(state, time, reduceMotion) {
+      state.pressureMovers = state.pressureMovers.filter(function (mover) {
+        mover.pressureWeight = getPressureWeight(mover, time, reduceMotion);
+
+        return mover.pressureWeight > 0 || mover.pressureTransition !== null;
+      });
+
+      return state.pressureMovers;
+    }
+
+    function getPressureWeight(mover, time, reduceMotion) {
+      var transition = mover.pressureTransition;
+
+      if (reduceMotion || !transition) return mover.pressureWeight;
+
+      var progress = clamp((time - transition.startedAt) / CONFIG.pressureTransitionDuration, 0, 1);
+
+      if (progress >= 1) {
+        mover.pressureWeight = transition.target;
+        mover.pressureTransition = null;
+        return mover.pressureWeight;
+      }
+
+      return transition.from + (transition.target - transition.from) * easeInOutSine(progress);
+    }
+
+    function bindCursorPressure(stage, state) {
+      if (!CONFIG.cursorPressureEnabled || !window.PointerEvent) return;
+
+      stage.addEventListener('pointermove', function (event) {
+        if (event.pointerType === 'touch') return;
+
+        state.cursor.active = true;
+        state.cursor.x = event.clientX;
+        state.cursor.y = event.clientY;
+      });
+
+      stage.addEventListener('pointerleave', function () {
+        state.cursor.active = false;
+      });
+
+      stage.addEventListener('pointercancel', function () {
+        state.cursor.active = false;
+      });
+    }
+
+    function getCursorPressure(state, points, rect, reduceMotion) {
+      if (reduceMotion || !CONFIG.cursorPressureEnabled || !state.cursor.active) return null;
+
+      var localX = state.cursor.x - rect.left;
+      var localY = state.cursor.y - rect.top;
+      var nearestIndex = 0;
+      var nearestDistance = Infinity;
+
+      points.forEach(function (point, index) {
+        var distance = Math.hypot(localX - point.x * rect.width, localY - point.y * rect.height);
+
+        if (distance < nearestDistance) {
+          nearestIndex = index;
+          nearestDistance = distance;
+        }
+      });
+
+      if (nearestDistance > CONFIG.cursorPressureRadius) return null;
+
+      var proximity = 1 - nearestDistance / CONFIG.cursorPressureRadius;
+      var smoothProximity = proximity * proximity * (3 - 2 * proximity);
+
+      return {
+        index: nearestIndex,
+        strength: CONFIG.cursorPressureStrength * smoothProximity
+      };
+    }
+
+    function cleanupExitingSlides(state, hasSlides, time) {
+      if (!state.exitingSlides.length) return;
+
+      var activeEntries = [];
+
+      state.exitingSlides.forEach(function (entry) {
+        if (time >= entry.hideAt) {
+          hideSlide(entry.slide, hasSlides);
+        } else {
+          activeEntries.push(entry);
+        }
+      });
+
+      state.exitingSlides = activeEntries;
+      state.exitingMovers = state.exitingMovers.filter(function (mover) {
+        return activeEntries.some(function (entry) {
+          return entry.slide === mover.slide;
+        });
+      });
+    }
+
+    function prepareSlides(slides, hasSlides) {
+      slides.forEach(function (slide) {
+        var items = getSlideItems(slide);
+
+        items.forEach(function (item) {
+          var computed = window.getComputedStyle(item);
+
+          if (item.__pressureBaseTransform == null) {
+            item.__pressureBaseTransform = computed.transform === 'none' ? '' : computed.transform;
+          }
+
+          prepareRevealTargets(item);
+          item.style.opacity = '0';
+        });
+
+        hideSlide(slide, hasSlides);
+      });
+    }
+
+    function showSlide(slide, hasSlides) {
+      if (!hasSlides) return;
+
+      slide.classList.add('is-pressure-active');
+      slide.style.visibility = 'visible';
+      slide.style.pointerEvents = 'none';
+    }
+
+    function hideSlide(slide, hasSlides) {
+      var items = getSlideItems(slide);
+
+      items.forEach(function (item) {
+        item.style.opacity = '0';
+        resetRevealTargets(item);
+      });
+
+      if (!hasSlides) return;
+
+      slide.classList.remove('is-pressure-active');
+      slide.style.visibility = 'hidden';
+      slide.style.pointerEvents = 'none';
+    }
+
+    function getSlideItems(slide) {
+      return Array.prototype.slice.call(slide.querySelectorAll(CONFIG.itemSelector));
+    }
+
+    function getRevealTargets(item) {
+      return Array.prototype.slice.call(item.children).filter(function (child) {
+        return child.nodeType === 1;
+      }).map(function (child) {
+        return {
+          el: child,
+          baseTransform: child.__pressureBaseTransform || ''
+        };
+      });
+    }
+
+    function prepareRevealTargets(item) {
+      getRevealTargets(item).forEach(function (target) {
+        var computed = window.getComputedStyle(target.el);
+
+        if (target.el.__pressureBaseTransform == null) {
+          target.el.__pressureBaseTransform = computed.transform === 'none' ? '' : computed.transform;
+        }
+
+        target.el.style.opacity = '0';
+      });
+    }
+
+    function resetRevealTargets(item) {
+      getRevealTargets(item).forEach(function (target) {
+        target.el.style.opacity = '0';
+      });
+    }
+
+    function buildMovers(slide, revealStartTime, revealImmediately, mode, layout) {
+      var items = getSlideItems(slide);
+      var revealMode = mode || 'in';
+
+      return items.map(function (el, index) {
+        var role = el.dataset.pressureRole || el.dataset.role || '';
+        var defaults = ITEM_DEFAULTS[role] || getAutoAnchor(index, items.length);
+        var anchor = getResponsiveAnchor(el, index, items.length, layout);
+        var delay = revealMode === 'out' ? CONFIG.itemExitDelay : CONFIG.itemRevealDelay;
+
+        return {
+          el: el,
+          slide: slide,
+          revealMode: revealMode,
+          phase: index * 1.85 + 0.6,
+          baseTransform: el.__pressureBaseTransform || '',
+          speed: readNumber(el, 'pulseSpeed', defaults.speed || CONFIG.pulseSpeed),
+          pressure: readNumber(el, 'pressure', defaults.pressure || 1),
+          follow: readNumber(el, 'follow', defaults.follow || CONFIG.followStrength),
+          itemIndex: index,
+          itemTotal: items.length,
+          anchorTargetX: anchor.x / 100,
+          anchorTargetY: anchor.y / 100,
+          anchorIndex: 0,
+          flowIndex: 0,
+          placement: null,
+          pressureWeight: 1,
+          pressureTransition: null,
+          revealTargets: getRevealTargets(el),
+          revealStart: revealImmediately ? -Infinity : revealStartTime + index * delay
+        };
+      });
+    }
+
+    function getSlideExitDuration(slide) {
+      var items = getSlideItems(slide);
+      var maxDuration = CONFIG.itemExitDuration;
+
+      items.forEach(function (item, itemIndex) {
+        var lineCount = Math.max(getRevealTargets(item).length, 1);
+        var duration =
+          itemIndex * CONFIG.itemExitDelay +
+          (lineCount - 1) * CONFIG.lineExitDelay +
+          CONFIG.itemExitDuration;
+
+        maxDuration = Math.max(maxDuration, duration);
+      });
+
+      return maxDuration;
+    }
+
+    function getAutoAnchor(index, total) {
+      var safeTotal = Math.max(total, 1);
+      var angle = -Math.PI / 2 + (index / safeTotal) * Math.PI * 2;
+
+      return {
+        x: 50 + Math.cos(angle) * 42,
+        y: 50 + Math.sin(angle) * 34,
+        pressure: 1,
+        follow: CONFIG.followStrength,
+        speed: CONFIG.pulseSpeed
+      };
+    }
+
+    function getResponsiveLayout(viewportWidth) {
+      var compactScale = viewportWidth <= CONFIG.tabletMaxWidth
+        ? CONFIG.compactMotionScale
+        : 1;
+
+      if (viewportWidth <= CONFIG.mobilePortraitMaxWidth) {
+        return {
+          key: 'vertical',
+          placement: 'vertical',
+          pressureScale: CONFIG.pressureScale * compactScale,
+          ambientScale: compactScale,
+          globalMotionScale: compactScale
+        };
+      }
+
+      if (viewportWidth <= CONFIG.mobileLandscapeMaxWidth) {
+        return {
+          key: 'side-soft',
+          placement: 'side',
+          pressureScale: CONFIG.pressureScale * compactScale,
+          ambientScale: compactScale,
+          globalMotionScale: compactScale
+        };
+      }
+
+      if (viewportWidth <= CONFIG.tabletMaxWidth) {
+        return {
+          key: 'vertical',
+          placement: 'vertical',
+          pressureScale: CONFIG.pressureScale * compactScale,
+          ambientScale: compactScale,
+          globalMotionScale: compactScale
+        };
+      }
+
+      return {
+        key: 'side',
+        placement: 'side',
+        pressureScale: CONFIG.pressureScale,
+        ambientScale: 1,
+        globalMotionScale: 1
+      };
+    }
+
+    function getResponsiveAnchor(el, index, total, layout) {
+      var role = el.dataset.pressureRole || el.dataset.role || '';
+      var defaults = ITEM_DEFAULTS[role] || getAutoAnchor(index, total);
+
+      if (layout && layout.placement === 'vertical') {
+        if (role === 'chill') return { x: 50, y: 20 };
+        if (role === 'heal') return { x: 29, y: 72 };
+        if (role === 'and') return { x: 71, y: 72 };
+
+        if (index === 0) return { x: 50, y: 20 };
+
+        var bottomCount = Math.max(total - 1, 1);
+        var bottomIndex = index - 1;
+
+        return {
+          x: bottomCount === 1 ? 50 : 25 + bottomIndex * 50 / (bottomCount - 1),
+          y: 72
+        };
+      }
+
+      return {
+        x: readNumber(el, 'anchorX', defaults.x),
+        y: readNumber(el, 'anchorY', defaults.y)
+      };
+    }
+
+    function startMaskIntro(mask, reduceMotion) {
+      if (mask.__pressureIntroStarted) return;
+
+      if (!CONFIG.introEnabled || reduceMotion) {
+        mask.style.opacity = '1';
+        return;
+      }
+
+      mask.__pressureIntroStarted = true;
+      mask.__pressureIntro = {
+        active: true,
+        startedAt: null
+      };
+      var background = getBackgroundStyles(mask);
+
+      mask.style.backgroundImage = 'none';
+      mask.style.backgroundColor = 'transparent';
+
+      waitForBackgroundImage(background.image, function () {
+        var photo = createIntroPhotoLayer(mask, background);
+
+        mask.style.opacity = '1';
+        playPhotoIntro(photo);
+      });
+    }
+
+    function getIntroShapeScale(mask, time, reduceMotion) {
+      var intro = mask.__pressureIntro;
+
+      if (reduceMotion || !intro || !intro.active) return 1;
+
+      if (intro.startedAt === null) intro.startedAt = time;
+
+      var progress = clamp((time - intro.startedAt) / CONFIG.introScaleDuration, 0, 1);
+
+      if (progress >= 1) {
+        intro.active = false;
+        return 1;
+      }
+
+      return CONFIG.introScale + (1 - CONFIG.introScale) * easeOutCirc(progress);
+    }
+
+    function waitForBackgroundImage(backgroundImage, callback) {
+      var match = backgroundImage.match(/url\((['"]?)(.*?)\1\)/);
+
+      if (!match || !match[2]) {
+        callback();
+        return;
+      }
+
+      var image = new Image();
+      var completed = false;
+
+      function done() {
+        if (completed) return;
+
+        completed = true;
+        callback();
+      }
+
+      image.onload = done;
+      image.onerror = done;
+      image.src = match[2];
+
+      if (image.complete) done();
+    }
+
+    function createIntroPhotoLayer(mask, background) {
+      var base = document.createElement('div');
+
+      if (window.getComputedStyle(mask).position === 'static') mask.style.position = 'relative';
+
+      base.className = 'pressure-shape-photo-layer';
+      copyBackgroundStyles(background, base);
+      base.style.opacity = '0';
+      base.style.transform = 'scale(' + CONFIG.introPhotoScale + ')';
+      mask.appendChild(base);
+
+      return base;
+    }
+
+    function getBackgroundStyles(el) {
+      var source = window.getComputedStyle(el);
+
+      return {
+        image: source.backgroundImage,
+        position: source.backgroundPosition,
+        size: source.backgroundSize,
+        repeat: source.backgroundRepeat,
+        origin: source.backgroundOrigin,
+        clip: source.backgroundClip,
+        attachment: source.backgroundAttachment,
+        blendMode: source.backgroundBlendMode,
+        color: source.backgroundColor
+      };
+    }
+
+    function copyBackgroundStyles(source, target) {
+      target.style.backgroundImage = source.image;
+      target.style.backgroundPosition = source.position;
+      target.style.backgroundSize = source.size;
+      target.style.backgroundRepeat = source.repeat;
+      target.style.backgroundOrigin = source.origin;
+      target.style.backgroundClip = source.clip;
+      target.style.backgroundAttachment = source.attachment;
+      target.style.backgroundBlendMode = source.blendMode;
+      target.style.backgroundColor = source.color;
+    }
+
+    function playPhotoIntro(photo) {
+      var startedAt = null;
+
+      function frame(time) {
+        if (startedAt === null) startedAt = time;
+
+        var elapsed = time - startedAt;
+        var rawProgress = clamp(elapsed / CONFIG.introDuration, 0, 1);
+        var opacityProgress = easeOutCubic(rawProgress);
+        var scale = CONFIG.introPhotoScale + (1 - CONFIG.introPhotoScale) * easeOutCirc(rawProgress);
+
+        photo.style.opacity = opacityProgress.toFixed(3);
+        photo.style.transform = 'scale(' + scale.toFixed(4) + ')';
+
+        if (elapsed < CONFIG.introDuration) {
+          requestAnimationFrame(frame);
+          return;
+        }
+
+        photo.style.opacity = '1';
+        photo.style.transform = 'scale(1)';
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    function samplePath(d, count) {
+      var ns = 'http://www.w3.org/2000/svg';
+      var svg = document.createElementNS(ns, 'svg');
+      var path = document.createElementNS(ns, 'path');
+
+      path.setAttribute('d', d);
+      svg.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;';
+      svg.appendChild(path);
+      document.body.appendChild(svg);
+
+      var length = path.getTotalLength();
+      var raw = [];
+      var minX = Infinity;
+      var minY = Infinity;
+      var maxX = -Infinity;
+      var maxY = -Infinity;
+
+      for (var i = 0; i < count; i++) {
+        var p = path.getPointAtLength((i / count) * length);
+
+        raw.push({ x: p.x, y: p.y });
+        minX = Math.min(minX, p.x);
+        minY = Math.min(minY, p.y);
+        maxX = Math.max(maxX, p.x);
+        maxY = Math.max(maxY, p.y);
+      }
+
+      svg.remove();
+
+      var width = maxX - minX || 1;
+      var height = maxY - minY || 1;
+
+      return raw.map(function (p) {
+        return {
+          x: (p.x - minX) / width,
+          y: (p.y - minY) / height
+        };
+      });
+    }
+
+    function syncAnchors(movers, points, rect) {
+      movers.forEach(function (mover) {
+        var target = {
+          x: mover.anchorTargetX * rect.width,
+          y: mover.anchorTargetY * rect.height
+        };
+
+        mover.anchorIndex = findNearestPointIndex(points, target, rect.width, rect.height);
+      });
+    }
+
+    function applyMask(el, points, dents, width, height, globalMotion, shapeScale) {
+      var deformedPoints = getDeformedPoints(points, dents, width, height, globalMotion, shapeScale);
+      var value = 'polygon(' + deformedPoints.map(function (point) {
+        return point.percent;
+      }).join(',') + ')';
+
+      el.style.clipPath = value;
+      el.style.webkitClipPath = value;
+      return deformedPoints;
+    }
+
+    function getDeformedPoints(points, dents, width, height, globalMotion, shapeScale) {
+      var cx = width / 2;
+      var cy = height / 2;
+      return points.map(function (point, index) {
+        var baseX = cx + (point.x * width - cx) * shapeScale;
+        var baseY = cy + (point.y * height - cy) * shapeScale;
+        var inwardX = cx - baseX;
+        var inwardY = cy - baseY;
+        var length = Math.hypot(inwardX, inwardY) || 1;
+        var x = baseX + (inwardX / length) * dents[index] + globalMotion.x;
+        var y = baseY + (inwardY / length) * dents[index] + globalMotion.y;
+
+        return {
+          x: x,
+          y: y,
+          percent: (x / width * 100).toFixed(3) + '% ' + (y / height * 100).toFixed(3) + '%'
+        };
+      });
+    }
+
+    function getMaxSafeDent(point, width, height, shapeScale) {
+      var cx = width / 2;
+      var cy = height / 2;
+      var baseX = cx + (point.x * width - cx) * shapeScale;
+      var baseY = cy + (point.y * height - cy) * shapeScale;
+
+      return Math.hypot(baseX - cx, baseY - cy) * 0.82;
+    }
+
+    function getResponsiveConstraintPlacements(movers, points, baseDeformedPoints, rect, stageRect, globalMotion) {
+      if (
+        window.innerWidth > CONFIG.constraintMaxViewportWidth ||
+        !shouldKeepItemsInViewport(stageRect)
+      ) {
+        return null;
+      }
+
+      var occupiedPlacements = [];
+      var placements = [];
+      var needsConstraint = false;
+
+      movers.forEach(function (mover) {
+        var itemRect = mover.el.getBoundingClientRect();
+
+        if (itemRect.width <= 0 || itemRect.height <= 0) return;
+
+        var desiredIndex = Number.isFinite(mover.flowIndex) ? mover.flowIndex : mover.anchorIndex;
+        var best = null;
+        var fallback = null;
+
+        points.forEach(function (point, index) {
+          var naturalPlacement = getItemPlacement(
+            mover,
+            index,
+            points,
+            baseDeformedPoints,
+            rect,
+            stageRect,
+            globalMotion,
+            itemRect
+          );
+          var placement = fitItemPlacementToViewport(naturalPlacement, itemRect, stageRect);
+          var flowDistance = circularIndexDistance(index, desiredIndex, points.length);
+          var adjustment = Math.hypot(
+            placement.x - naturalPlacement.x,
+            placement.y - naturalPlacement.y
+          );
+          var collisionArea = getItemPlacementCollisionArea(
+            placement,
+            itemRect,
+            stageRect,
+            occupiedPlacements
+          );
+          var score = flowDistance + adjustment / Math.max(CONFIG.layoutDentClearance, 1);
+          var candidate = {
+            index: index,
+            placement: placement,
+            itemRect: itemRect,
+            score: score,
+            adjustment: adjustment,
+            collisionArea: collisionArea
+          };
+
+          if (
+            !fallback ||
+            collisionArea * 1000 + score < fallback.collisionArea * 1000 + fallback.score
+          ) {
+            fallback = candidate;
+          }
+
+          if (collisionArea === 0 && (!best || score < best.score)) {
+            best = candidate;
+          }
+        });
+
+        var selected = best || fallback;
+
+        if (!selected) return;
+
+        selected.mover = mover;
+        occupiedPlacements.push(getItemPlacementBounds(selected.placement, itemRect, stageRect));
+        placements.push(selected);
+        needsConstraint =
+          needsConstraint ||
+          selected.adjustment > 1 ||
+          circularIndexDistance(selected.index, desiredIndex, points.length) > 1;
+      });
+
+      return needsConstraint ? placements : null;
+    }
+
+    function fitItemPlacementToViewport(placement, itemRect, stageRect) {
+      var padding = CONFIG.itemViewportPadding;
+      var minX = padding - stageRect.left;
+      var minY = padding - stageRect.top;
+      var maxX = Math.max(minX, window.innerWidth - padding - itemRect.width - stageRect.left);
+      var maxY = Math.max(minY, window.innerHeight - padding - itemRect.height - stageRect.top);
+
+      return {
+        x: clamp(placement.x, minX, maxX),
+        y: clamp(placement.y, minY, maxY)
+      };
+    }
+
+    function getLayoutDentTarget(placements, points, baseDeformedPoints, rect, stageRect) {
+      var target = points.map(function () { return 0; });
+
+      if (!placements) return target;
+
+      placements.forEach(function (entry) {
+        var basePoint = getLoopedPoint(points, entry.index);
+        var deformedPoint = getLoopedPoint(baseDeformedPoints, entry.index);
+        var baseX = basePoint.x * rect.width;
+        var baseY = basePoint.y * rect.height;
+        var normal = getOutwardNormal(baseX, baseY, rect.width, rect.height);
+        var centerX = stageRect.left + entry.placement.x + entry.itemRect.width / 2 - rect.left;
+        var centerY = stageRect.top + entry.placement.y + entry.itemRect.height / 2 - rect.top;
+        var outwardDistance =
+          (centerX - deformedPoint.x) * normal.x +
+          (centerY - deformedPoint.y) * normal.y;
+        var support =
+          Math.abs(normal.x) * entry.itemRect.width / 2 +
+          Math.abs(normal.y) * entry.itemRect.height / 2;
+        var requiredDent = Math.max(
+          0,
+          support + CONFIG.layoutDentClearance - outwardDistance
+        );
+
+        if (requiredDent <= 0) return;
+
+        var radius = getLayoutDentRadius(entry.itemRect, normal, rect, points.length);
+
+        target.forEach(function (value, pointIndex) {
+          target[pointIndex] +=
+            getSoftZone(pointIndex, entry.index, radius, points.length) * requiredDent;
+        });
+      });
+
+      return target.map(function (value) {
+        return Math.min(value, CONFIG.layoutDentMax);
+      });
+    }
+
+    function getLayoutDentRadius(itemRect, normal, rect, pointCount) {
+      var tangentX = -normal.y;
+      var tangentY = normal.x;
+      var span = Math.abs(tangentX) * itemRect.width + Math.abs(tangentY) * itemRect.height;
+      var radius = span * pointCount / Math.max(Math.PI * (rect.width + rect.height), 1);
+
+      return clamp(radius, CONFIG.layoutDentMinZone, CONFIG.layoutDentMaxZone);
+    }
+
+    function getConstraintPlacement(placements, mover) {
+      if (!placements) return null;
+
+      for (var i = 0; i < placements.length; i++) {
+        if (placements[i].mover === mover) return placements[i];
+      }
+
+      return null;
+    }
+
+    function moveItemsFromShape(movers, points, deformedPoints, rect, stageRect, globalMotion, time, reduceMotion, constraintPlacements) {
+      var occupiedPlacements = [];
+
+      movers.forEach(function (mover) {
+        var itemRect = mover.el.getBoundingClientRect();
+        var desiredFlowIndex = Number.isFinite(mover.flowIndex) ? mover.flowIndex : mover.anchorIndex;
+        var constrained = getConstraintPlacement(constraintPlacements, mover);
+        var placement;
+
+        if (constrained) {
+          placement = constrained.placement;
+        } else {
+          var placementIndex = resolveItemPlacementIndex(
+            mover,
+            desiredFlowIndex,
+            points,
+            deformedPoints,
+            rect,
+            stageRect,
+            globalMotion,
+            itemRect,
+            occupiedPlacements
+          );
+
+          placement = getItemPlacement(
+            mover,
+            placementIndex,
+            points,
+            deformedPoints,
+            rect,
+            stageRect,
+            globalMotion,
+            itemRect
+          );
+        }
+        var revealState = getRevealState(mover.revealStart, mover.revealMode, time, reduceMotion);
+
+        mover.el.style.transform =
+          mover.baseTransform +
+          ' translate3d(' + placement.x.toFixed(2) + 'px,' + placement.y.toFixed(2) + 'px,0)';
+
+        if (itemRect.width > 0 && itemRect.height > 0) {
+          occupiedPlacements.push(getItemPlacementBounds(placement, itemRect, stageRect));
+        }
+
+        updateReveal(mover, revealState, time, reduceMotion);
+      });
+    }
+
+    function resolveItemPlacementIndex(mover, desiredIndex, points, deformedPoints, rect, stageRect, globalMotion, itemRect, occupiedPlacements) {
+      if (!shouldKeepItemsInViewport(stageRect) || itemRect.width <= 0 || itemRect.height <= 0) {
+        return desiredIndex;
+      }
+
+      var cached = mover.placement;
+
+      if (
+        cached &&
+        Math.abs(cached.width - itemRect.width) <= 1 &&
+        Math.abs(cached.height - itemRect.height) <= 1 &&
+        Math.abs(cached.viewportWidth - window.innerWidth) <= 1 &&
+        Math.abs(cached.viewportHeight - window.innerHeight) <= 1
+      ) {
+        var cachedPlacement = getItemPlacement(
+          mover,
+          cached.index,
+          points,
+          deformedPoints,
+          rect,
+          stageRect,
+          globalMotion,
+          itemRect
+        );
+
+        if (isItemPlacementAvailable(cachedPlacement, itemRect, stageRect, occupiedPlacements)) {
+          return cached.index;
+        }
+      }
+
+      var bestIndex = null;
+      var bestScore = Infinity;
+      var fallbackIndex = desiredIndex;
+      var fallbackScore = Infinity;
+
+      points.forEach(function (point, index) {
+        var candidate = getItemPlacement(
+          mover,
+          index,
+          points,
+          deformedPoints,
+          rect,
+          stageRect,
+          globalMotion,
+          itemRect
+        );
+
+        var score = circularIndexDistance(index, desiredIndex, points.length);
+        var collisionArea = getItemPlacementCollisionArea(candidate, itemRect, stageRect, occupiedPlacements);
+
+        if (isItemPlacementInViewport(candidate, itemRect, stageRect)) {
+          var fallbackCandidateScore = collisionArea * 1000 + score;
+
+          if (fallbackCandidateScore < fallbackScore) {
+            fallbackScore = fallbackCandidateScore;
+            fallbackIndex = index;
+          }
+        }
+
+        if (!isItemPlacementAvailable(candidate, itemRect, stageRect, occupiedPlacements)) return;
+
+        if (score < bestScore) {
+          bestScore = score;
+          bestIndex = index;
+        }
+      });
+
+      var index = bestIndex === null ? fallbackIndex : bestIndex;
+
+      mover.placement = {
+        index: index,
+        width: itemRect.width,
+        height: itemRect.height,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight
+      };
+
+      return index;
+    }
+
+    function getItemPlacement(mover, flowIndex, points, deformedPoints, rect, stageRect, globalMotion, itemRect) {
+      var basePoint = getLoopedPoint(points, flowIndex);
+      var deformedPoint = getLoopedPoint(deformedPoints, flowIndex);
+      var baseAnchorX = basePoint.x * rect.width;
+      var baseAnchorY = basePoint.y * rect.height;
+      var normal = getOutwardNormal(baseAnchorX, baseAnchorY, rect.width, rect.height);
+      var support = Math.abs(normal.x) * itemRect.width / 2 + Math.abs(normal.y) * itemRect.height / 2;
+      var localAnchorX = deformedPoint.x - globalMotion.x;
+      var localAnchorY = deformedPoint.y - globalMotion.y;
+      var localDeltaX = localAnchorX - baseAnchorX;
+      var localDeltaY = localAnchorY - baseAnchorY;
+      var dentAmount = Math.hypot(localDeltaX, localDeltaY);
+      var nest = CONFIG.nestStrength * clamp(dentAmount / Math.max(CONFIG.maxDent, 1), 0, 1);
+      var baseCenterX = baseAnchorX + normal.x * (CONFIG.itemGap + support);
+      var baseCenterY = baseAnchorY + normal.y * (CONFIG.itemGap + support);
+      var localTargetCenterX =
+        baseCenterX +
+        localDeltaX * mover.follow * CONFIG.followScale -
+        normal.x * CONFIG.itemGap * nest;
+      var localTargetCenterY =
+        baseCenterY +
+        localDeltaY * mover.follow * CONFIG.followScale -
+        normal.y * CONFIG.itemGap * nest;
+
+      return {
+        x: rect.left - stageRect.left + localTargetCenterX + globalMotion.x - itemRect.width / 2,
+        y: rect.top - stageRect.top + localTargetCenterY + globalMotion.y - itemRect.height / 2
+      };
+    }
+
+    function shouldKeepItemsInViewport(stageRect) {
+      return window.scrollY <= 1 && stageRect.top >= -1 && stageRect.left >= -1;
+    }
+
+    function isItemPlacementInViewport(placement, itemRect, stageRect) {
+      var padding = CONFIG.itemViewportPadding;
+      var left = stageRect.left + placement.x;
+      var top = stageRect.top + placement.y;
+
+      return (
+        left >= padding &&
+        top >= padding &&
+        left + itemRect.width <= window.innerWidth - padding &&
+        top + itemRect.height <= window.innerHeight - padding
+      );
+    }
+
+    function isItemPlacementAvailable(placement, itemRect, stageRect, occupiedPlacements) {
+      return (
+        isItemPlacementInViewport(placement, itemRect, stageRect) &&
+        getItemPlacementCollisionArea(placement, itemRect, stageRect, occupiedPlacements) === 0
+      );
+    }
+
+    function getItemPlacementBounds(placement, itemRect, stageRect) {
+      var left = stageRect.left + placement.x;
+      var top = stageRect.top + placement.y;
+
+      return {
+        left: left,
+        top: top,
+        right: left + itemRect.width,
+        bottom: top + itemRect.height
+      };
+    }
+
+    function getItemPlacementCollisionArea(placement, itemRect, stageRect, occupiedPlacements) {
+      var bounds = getItemPlacementBounds(placement, itemRect, stageRect);
+      var gap = CONFIG.itemCollisionGap;
+
+      return occupiedPlacements.reduce(function (area, occupied) {
+        var overlapWidth = Math.min(bounds.right, occupied.right + gap) - Math.max(bounds.left, occupied.left - gap);
+        var overlapHeight = Math.min(bounds.bottom, occupied.bottom + gap) - Math.max(bounds.top, occupied.top - gap);
+
+        return area + (overlapWidth > 0 && overlapHeight > 0 ? overlapWidth * overlapHeight : 0);
+      }, 0);
+    }
+
+    function updateReveal(mover, revealState, time, reduceMotion) {
+      if (!mover.revealTargets.length) {
+        mover.el.style.opacity = revealState.opacity.toFixed(3);
+        mover.el.style.transform += ' translateY(' + revealState.offset.toFixed(2) + 'px)';
+        return;
+      }
+
+      mover.el.style.opacity = '1';
+
+      mover.revealTargets.forEach(function (target, index) {
+        var lineDelay = mover.revealMode === 'out' ? CONFIG.lineExitDelay : CONFIG.lineRevealDelay;
+        var lineStart = mover.revealStart === -Infinity
+          ? -Infinity
+          : mover.revealStart + index * lineDelay;
+        var lineState = getRevealState(lineStart, mover.revealMode, time, reduceMotion);
+
+        target.el.style.opacity = lineState.opacity.toFixed(3);
+        target.el.style.transform =
+          target.baseTransform +
+          ' translateY(' + lineState.offset.toFixed(2) + 'px)';
+      });
+    }
+
+    function getRevealState(start, mode, time, reduceMotion) {
+      if (reduceMotion || start === -Infinity) {
+        return {
+          opacity: mode === 'out' ? 0 : 1,
+          offset: mode === 'out' ? CONFIG.itemExitOffset : 0
+        };
+      }
+
+      var duration = mode === 'out' ? CONFIG.itemExitDuration : CONFIG.itemRevealDuration;
+      var progress = easeOutCubic(clamp((time - start) / duration, 0, 1));
+
+      if (mode === 'out') {
+        return {
+          opacity: 1 - progress,
+          offset: progress * CONFIG.itemExitOffset
+        };
+      }
+
+      return {
+        opacity: progress,
+        offset: (1 - progress) * CONFIG.itemRevealOffset
+      };
+    }
+
+    function getSlideProfile(state, time, reduceMotion) {
+      var activeProfile = state.profiles[state.activeSlideIndex] || [];
+
+      if (reduceMotion || state.transitionStart === null) {
+        return activeProfile;
+      }
+
+      var progress = clamp((time - state.transitionStart) / CONFIG.slideTransition, 0, 1);
+
+      if (progress >= 1) {
+        state.transitionStart = null;
+        state.previousSlideIndex = state.activeSlideIndex;
+        return activeProfile;
+      }
+
+      return mixProfiles(
+        state.profiles[state.previousSlideIndex] || activeProfile,
+        activeProfile,
+        progress
+      );
+    }
+
+    function buildSlideProfile(slideIndex, points, slide, layout) {
+      var pointCount = points.length;
+      var seed = slideIndex + 1;
+      var items = getSlideItems(slide);
+      var centers = items.map(function (el, index) {
+        var target = getResponsiveAnchor(el, index, items.length || 3, layout);
+
+        return {
+          index: findNearestNormalizedPointIndex(points, {
+            x: target.x / 100,
+            y: target.y / 100
+          }),
+          radius: pointCount * 0.2,
+          strength: 0.7
+        };
+      });
+      var profile = [];
+
+      if (centers.length === 0) {
+        centers = [
+          { index: seededValue(seed, 1) * pointCount, radius: pointCount * 0.24, strength: 0.72 },
+          { index: seededValue(seed, 2) * pointCount, radius: pointCount * 0.2, strength: 0.58 }
+        ];
+      }
+
+      for (var i = 0; i < pointCount; i++) {
+        var p = i / pointCount;
+        var waveA = (Math.sin(p * Math.PI * 2 + 1.3) + 1) / 2;
+        var waveB = (Math.sin(p * Math.PI * 4 - 0.9) + 1) / 2;
+        var waveC = (Math.sin(p * Math.PI * 6 + 2.1) + 1) / 2;
+        var amount = 0.02 + waveA * 0.015 + waveB * 0.012 + waveC * 0.008;
+
+        centers.forEach(function (center) {
+          amount += getSoftZone(i, center.index, center.radius, pointCount) * center.strength;
+        });
+
+        profile.push(CONFIG.slideShapeStrength * clamp(amount, 0.02, 1));
+      }
+
+      return smoothCircular(smoothCircular(smoothCircular(profile)));
+    }
+
+    function findNearestNormalizedPointIndex(points, target) {
+      var nearestIndex = 0;
+      var nearestDistance = Infinity;
+
+      points.forEach(function (point, index) {
+        var distance = Math.hypot(target.x - point.x, target.y - point.y);
+
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestIndex = index;
+        }
+      });
+
+      return nearestIndex;
+    }
+
+    function mixProfiles(fromProfile, toProfile, amount) {
+      return toProfile.map(function (value, index) {
+        var from = fromProfile[index] || 0;
+
+        return from + (value - from) * amount;
+      });
+    }
+
+    function getSoftZone(index, center, radius, pointCount) {
+      var distance = circularIndexDistance(index, center, pointCount);
+
+      if (distance > radius) return 0;
+
+      var k = 1 - distance / radius;
+
+      return k * k * (3 - 2 * k);
+    }
+
+    function seededValue(seed, salt) {
+      var x = Math.sin(seed * 12.9898 + salt * 78.233) * 43758.5453;
+
+      return x - Math.floor(x);
+    }
+
+    function findNearestPointIndex(points, target, width, height) {
+      var nearestIndex = 0;
+      var nearestDistance = Infinity;
+
+      points.forEach(function (point, index) {
+        var x = point.x * width;
+        var y = point.y * height;
+        var distance = Math.hypot(target.x - x, target.y - y);
+
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestIndex = index;
+        }
+      });
+
+      return nearestIndex;
+    }
+
+    function getContourZoneSize(pointCount) {
+      var requestedSize = (CONFIG.pressureRadius * CONFIG.deformationSpread) / 18;
+      var maxLocalSize = pointCount * CONFIG.maxLocalZone;
+
+      return clamp(requestedSize, 5, maxLocalSize);
+    }
+
+    function circularIndexDistance(a, b, length) {
+      var direct = Math.abs(a - b);
+
+      return Math.min(direct, length - direct);
+    }
+
+    function getAmbientDent(index, pointCount, t, reduceMotion, scale) {
+      if (reduceMotion || CONFIG.ambientDent <= 0) return 0;
+
+      var p = index / pointCount;
+      var speed = CONFIG.ambientSpeed;
+      var waveA = Math.sin(p * Math.PI * 2.0 + t * speed * 0.42 + 0.8);
+      var waveB = Math.sin(p * Math.PI * 4.0 - t * speed * 0.29 + 2.1);
+      var waveC = Math.sin(p * Math.PI * 6.0 + t * speed * 0.18 + 4.0);
+      var mixed = waveA * 0.5 + waveB * 0.32 + waveC * 0.18;
+      var inwardOnly = (mixed + 1) / 2;
+
+      return CONFIG.ambientDent * inwardOnly * (typeof scale === 'number' ? scale : 1);
+    }
+
+    function getFlowIndex(mover, t, zoneSize, pointCount, reduceMotion) {
+      if (reduceMotion || CONFIG.flowAmount <= 0) return mover.anchorIndex;
+
+      var amount = zoneSize * CONFIG.flowAmount;
+      var drift =
+        Math.sin(t * mover.speed * 0.31 + mover.phase * 1.9) * 0.62 +
+        Math.sin(t * mover.speed * 0.17 + mover.phase * 2.7 + 1.3) * 0.38;
+
+      return wrapIndex(mover.anchorIndex + drift * amount, pointCount);
+    }
+
+    function getLoopedPoint(points, index) {
+      var length = points.length;
+      var wrapped = wrapIndex(index, length);
+      var lowerIndex = Math.floor(wrapped);
+      var upperIndex = (lowerIndex + 1) % length;
+      var amount = wrapped - lowerIndex;
+      var lower = points[lowerIndex];
+      var upper = points[upperIndex];
+
+      return {
+        x: lower.x + (upper.x - lower.x) * amount,
+        y: lower.y + (upper.y - lower.y) * amount
+      };
+    }
+
+    function wrapIndex(index, length) {
+      return ((index % length) + length) % length;
+    }
+
+    function getOutwardNormal(x, y, width, height) {
+      var vx = x - width / 2;
+      var vy = y - height / 2;
+      var length = Math.hypot(vx, vy) || 1;
+
+      return {
+        x: vx / length,
+        y: vy / length
+      };
+    }
+
+    function getGlobalMotion(t, scale) {
+      var amount = typeof scale === 'number' ? scale : 1;
+
+      return {
+        x: Math.sin(t * 0.38 + 0.4) * CONFIG.globalMoveX * CONFIG.globalMotion * amount,
+        y: Math.cos(t * 0.31 + 1.1) * CONFIG.globalMoveY * CONFIG.globalMotion * amount
+      };
+    }
+
+    function smoothCircular(values) {
+      return values.map(function (value, index, array) {
+        var prev = array[(index - 1 + array.length) % array.length];
+        var next = array[(index + 1) % array.length];
+
+        return (prev + value * 2 + next) / 4;
+      });
+    }
+
+    function easeOutCubic(value) {
+      return 1 - Math.pow(1 - value, 3);
+    }
+
+    function easeOutCirc(value) {
+      return Math.sqrt(1 - Math.pow(value - 1, 2));
+    }
+
+    function easeInOutSine(value) {
+      return -(Math.cos(Math.PI * value) - 1) / 2;
+    }
+
+    function readNumber(el, name, fallback) {
+      var value = parseFloat(el.dataset[name]);
+
+      return Number.isFinite(value) ? value : fallback;
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+  })();
+</script>

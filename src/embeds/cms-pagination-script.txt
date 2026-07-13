@@ -1,0 +1,78 @@
+<!-- Общая CMS-пагинация -->
+<script>
+(function () {
+  if (window.ChillCmsPagination) return;
+
+  function create(options) {
+    const activeClass = options.activeClass || 'is-active';
+    const targetAttribute = options.targetAttribute || 'data-chill-pagination-target';
+    let dots = [];
+
+    function getDots() {
+      return Array.from(options.getDots ? options.getDots() : []);
+    }
+
+    function bindDot(dot) {
+      if (dot.dataset.chillPaginationBound === 'true') return;
+
+      dot.dataset.chillPaginationBound = 'true';
+      dot.addEventListener('click', function (event) {
+        event.preventDefault();
+
+        const targetIndex = Number(dot.getAttribute(targetAttribute));
+        if (Number.isFinite(targetIndex) && typeof options.onSelect === 'function') {
+          options.onSelect(targetIndex);
+        }
+      });
+
+      if (dot.tagName === 'BUTTON') return;
+
+      dot.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+
+        event.preventDefault();
+        dot.click();
+      });
+    }
+
+    function refresh() {
+      dots = getDots();
+      dots.forEach(bindDot);
+      return dots;
+    }
+
+    function update(activeIndex) {
+      const currentDots = refresh();
+
+      currentDots.forEach(function (dot, dotIndex) {
+        const targetIndex = Number(options.getTargetIndex(dotIndex, activeIndex, currentDots.length));
+        const isActive = Number.isFinite(targetIndex) && targetIndex === activeIndex;
+
+        dot.setAttribute(targetAttribute, Number.isFinite(targetIndex) ? String(targetIndex) : '0');
+        dot.classList.toggle(activeClass, isActive);
+        dot.setAttribute('aria-current', isActive ? 'true' : 'false');
+      });
+    }
+
+    return {
+      refresh: refresh,
+      update: update
+    };
+  }
+
+  function getWindowedTargetIndex(dotIndex, activeIndex, dotCount, maxIndex, hasNextPage) {
+    if (!dotCount || activeIndex <= 0) return dotIndex;
+
+    if (!hasNextPage && activeIndex >= maxIndex - 1) {
+      return Math.max(0, maxIndex - dotCount + 1) + dotIndex;
+    }
+
+    return Math.max(0, activeIndex - 1) + dotIndex;
+  }
+
+  window.ChillCmsPagination = {
+    create: create,
+    getWindowedTargetIndex: getWindowedTargetIndex
+  };
+})();
+</script>

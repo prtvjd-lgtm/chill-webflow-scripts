@@ -1,0 +1,381 @@
+<!-- Смена цвета хедера -->
+<script>
+(function () {
+  if (window.__chillHeaderSwitcherStarted) return;
+  window.__chillHeaderSwitcherStarted = true;
+
+  const WHITE_HEADER_SELECTOR = '.header-white-section';
+  const ORANGE_HEADER_SELECTOR = '.header-orange-section';
+  const WIDE_HEADER_SELECTOR = '.wide-header';
+  const HEADER_HIDE_SELECTOR = '.header-hide-section';
+  const HEADER_HEIGHT = 53;
+  const HEADER_HIDE_OFFSET = 24;
+  const POINTS = [0.12, 0.3, 0.5, 0.7, 0.88];
+  const ITEMS_SELECTOR = '.logo, .main-button';
+  const EASING = 'cubic-bezier(0.215, 0.61, 0.355, 1)';
+  const HIDE_EASING = 'ease-out';
+  const HIDE_VIEWPORT_GAP = 1;
+  const DURATION = 600;
+  const HIDE_DURATION = DURATION / 2;
+  const STAGGER = 40;
+  const DEFAULT_PADDING_X = 24;
+  const WIDE_PADDING_X = 40;
+
+  let whiteHeader, orangeHeader, activeVariant = null;
+  let activeWidePadding = null;
+  let headerHidden = false;
+  let ticking = false;
+  let animations = [];
+  let paddingAnimations = [];
+  let rafId = 0;
+
+  function init() {
+    whiteHeader = document.querySelector('.header.white');
+    orangeHeader = document.querySelector('.header.orange');
+    if (!whiteHeader || !orangeHeader) return;
+
+    activeVariant = getVisibleVariant();
+    update();
+
+    window.addEventListener('scroll', requestUpdate, { passive: true });
+    window.addEventListener('resize', requestUpdate);
+  }
+
+  function requestUpdate() {
+    if (ticking) return;
+    ticking = true;
+
+    requestAnimationFrame(function () {
+      ticking = false;
+      update();
+    });
+  }
+
+  function update() {
+    updateHeaderPadding();
+
+    if (shouldHideHeader()) {
+      if (!headerHidden) hideCurrentHeader();
+      return;
+    }
+
+    const nextVariant = getNextHeaderVariant();
+
+    if (headerHidden) {
+      showHeader(nextVariant);
+      return;
+    }
+
+    if (nextVariant !== activeVariant) switchHeader(nextVariant);
+  }
+
+  function shouldHideHeader() {
+    const triggerY = HEADER_HEIGHT + HEADER_HIDE_OFFSET;
+    const blocks = Array.from(document.querySelectorAll(HEADER_HIDE_SELECTOR));
+
+    return blocks.some(function (block) {
+      const rect = block.getBoundingClientRect();
+      return rect.top <= triggerY && rect.bottom > 0;
+    });
+  }
+
+  function hideCurrentHeader() {
+    const header = getCurrentHeader();
+    if (!header) return;
+
+    headerHidden = true;
+    stopAnimations();
+    header.style.display = 'flex';
+
+    animateItemsOut(header, function () {
+      header.style.pointerEvents = 'none';
+    });
+  }
+
+  function showHeader(nextVariant) {
+    headerHidden = false;
+    [whiteHeader, orangeHeader].forEach(function (header) {
+      header.style.pointerEvents = '';
+    });
+
+    switchHeader(nextVariant || activeVariant || getVisibleVariant() || 'orange');
+  }
+
+  function getNextHeaderVariant() {
+    const headerVariant = getHeaderVariantUnderHeader();
+    return headerVariant || 'white';
+  }
+
+  function updateHeaderPadding() {
+    const nextWidePadding = isOverWideHeaderBlock();
+    if (nextWidePadding === activeWidePadding) return;
+
+    activeWidePadding = nextWidePadding;
+    animateHeaderPadding(nextWidePadding);
+  }
+
+  function animateHeaderPadding(isWide) {
+    const targetPadding = (isWide ? WIDE_PADDING_X : DEFAULT_PADDING_X) + 'px';
+
+    [whiteHeader, orangeHeader].forEach(function (header) {
+      const computedStyle = getComputedStyle(header);
+      const fromPaddingLeft = computedStyle.paddingLeft;
+      const fromPaddingRight = computedStyle.paddingRight;
+
+      cancelHeaderPaddingAnimations(header);
+
+      header.style.paddingLeft = targetPadding;
+      header.style.paddingRight = targetPadding;
+
+      if (fromPaddingLeft === targetPadding && fromPaddingRight === targetPadding) return;
+
+      const animation = header.animate(
+        [
+          { paddingLeft: fromPaddingLeft, paddingRight: fromPaddingRight },
+          { paddingLeft: targetPadding, paddingRight: targetPadding }
+        ],
+        {
+          duration: DURATION,
+          easing: EASING,
+          fill: 'none'
+        }
+      );
+
+      paddingAnimations.push({ header: header, animation: animation });
+
+      animation.addEventListener('finish', function () {
+        removePaddingAnimation(animation);
+      });
+
+      animation.addEventListener('cancel', function () {
+        removePaddingAnimation(animation);
+      });
+    });
+  }
+
+  function cancelHeaderPaddingAnimations(header) {
+    paddingAnimations.slice().forEach(function (entry) {
+      if (entry.header === header) entry.animation.cancel();
+    });
+  }
+
+  function removePaddingAnimation(animation) {
+    paddingAnimations = paddingAnimations.filter(function (entry) {
+      return entry.animation !== animation;
+    });
+  }
+
+  function isOverWideHeaderBlock() {
+    return isOverSelector(WIDE_HEADER_SELECTOR);
+  }
+
+  function getHeaderVariantUnderHeader() {
+    return withHeadersIgnoringPointerEvents(function () {
+      const width = window.innerWidth || document.documentElement.clientWidth;
+      const y = getSampleY();
+      let hasOrangeSection = false;
+
+      for (let index = 0; index < POINTS.length; index += 1) {
+        const x = Math.max(0, Math.min(width - 1, Math.round(width * POINTS[index])));
+        const variant = getNearestHeaderVariant(document.elementFromPoint(x, y));
+
+        if (variant === 'white') return 'white';
+        if (variant === 'orange') hasOrangeSection = true;
+      }
+
+      return hasOrangeSection ? 'orange' : null;
+    });
+  }
+
+  function getNearestHeaderVariant(element) {
+    let current = element;
+
+    while (current && current !== document) {
+      if (current.matches && current.matches(WHITE_HEADER_SELECTOR)) return 'white';
+      if (current.matches && current.matches(ORANGE_HEADER_SELECTOR)) return 'orange';
+      current = current.parentElement;
+    }
+
+    return null;
+  }
+
+  function isOverSelector(selector) {
+    return withHeadersIgnoringPointerEvents(function () {
+      const width = window.innerWidth || document.documentElement.clientWidth;
+      const y = getSampleY();
+
+      return POINTS.some(function (point) {
+        const x = Math.max(0, Math.min(width - 1, Math.round(width * point)));
+        const element = document.elementFromPoint(x, y);
+
+        return !!(element && element.closest(selector));
+      });
+    });
+  }
+
+  function withHeadersIgnoringPointerEvents(callback) {
+    const headers = [whiteHeader, orangeHeader];
+    const prevPointerEvents = headers.map(function (header) {
+      return header.style.pointerEvents;
+    });
+
+    headers.forEach(function (header) {
+      header.style.pointerEvents = 'none';
+    });
+
+    try {
+      return callback();
+    } finally {
+      headers.forEach(function (header, index) {
+        header.style.pointerEvents = prevPointerEvents[index];
+      });
+    }
+  }
+
+  function getSampleY() {
+    const header = getCurrentHeader();
+    const rect = header ? header.getBoundingClientRect() : null;
+    const bottom = rect && rect.height ? rect.bottom : HEADER_HEIGHT;
+    const maxY = (window.innerHeight || document.documentElement.clientHeight) - 1;
+
+    return Math.max(0, Math.min(maxY, Math.round(bottom + 1)));
+  }
+
+  function getCurrentHeader() {
+    if (activeVariant === 'orange') return orangeHeader;
+    if (activeVariant === 'white') return whiteHeader;
+
+    return getComputedStyle(orangeHeader).display !== 'none'
+      ? orangeHeader
+      : whiteHeader;
+  }
+
+  function switchHeader(nextVariant) {
+    stopAnimations();
+
+    const nextHeader = nextVariant === 'orange' ? orangeHeader : whiteHeader;
+    const oldHeader = nextVariant === 'orange' ? whiteHeader : orangeHeader;
+
+    oldHeader.style.display = 'none';
+    nextHeader.style.display = 'flex';
+    activeVariant = nextVariant;
+
+    animateItems(nextHeader);
+  }
+
+  function animateItems(header) {
+    const items = Array.from(header.querySelectorAll(ITEMS_SELECTOR));
+
+    items.forEach(function (item, index) {
+      item.style.willChange = 'transform';
+
+      const animation = item.animate(
+        [
+          { transform: 'translate3d(0, 20px, 0)' },
+          { transform: 'translate3d(0, 0, 0)' }
+        ],
+        {
+          duration: DURATION,
+          delay: index * STAGGER,
+          easing: EASING,
+          fill: 'backwards'
+        }
+      );
+
+      animations.push(animation);
+
+      animation.addEventListener('finish', function () {
+        item.style.willChange = '';
+        animation.cancel();
+
+        animations = animations.filter(function (activeAnimation) {
+          return activeAnimation !== animation;
+        });
+      });
+    });
+  }
+
+  function animateItemsOut(header, onComplete) {
+    const items = Array.from(header.querySelectorAll(ITEMS_SELECTOR));
+    const itemAnimations = [];
+    let remaining = items.length;
+
+    if (!remaining) {
+      onComplete();
+      return;
+    }
+
+    items.forEach(function (item, index) {
+      const hideDistance = getViewportExitDistance(item);
+
+      item.style.willChange = 'transform';
+
+      const animation = item.animate(
+        [
+          { transform: 'translate3d(0, 0, 0)' },
+          { transform: 'translate3d(0, -' + hideDistance + 'px, 0)' }
+        ],
+        {
+          duration: HIDE_DURATION,
+          delay: index * STAGGER,
+          easing: HIDE_EASING,
+          fill: 'forwards'
+        }
+      );
+
+      animations.push(animation);
+      itemAnimations.push(animation);
+
+      animation.addEventListener('finish', function () {
+        remaining -= 1;
+        if (remaining > 0) return;
+
+        onComplete();
+
+        items.forEach(function (item) {
+          item.style.willChange = '';
+        });
+      });
+    });
+  }
+
+  function getViewportExitDistance(item) {
+    const rect = item.getBoundingClientRect();
+    return Math.max(HEADER_HEIGHT, Math.ceil(rect.bottom + HIDE_VIEWPORT_GAP));
+  }
+
+  function stopAnimations() {
+    if (rafId) cancelAnimationFrame(rafId);
+
+    animations.forEach(function (animation) {
+      animation.cancel();
+    });
+
+    animations = [];
+
+    document.querySelectorAll('.header.white ' + ITEMS_SELECTOR + ', .header.orange ' + ITEMS_SELECTOR)
+      .forEach(function (item) {
+        item.style.transform = '';
+        item.style.willChange = '';
+      });
+  }
+
+  function getVisibleVariant() {
+    const whiteVisible = getComputedStyle(whiteHeader).display !== 'none';
+    const orangeVisible = getComputedStyle(orangeHeader).display !== 'none';
+
+    if (orangeVisible && !whiteVisible) return 'orange';
+    if (whiteVisible && !orangeVisible) return 'white';
+
+    return null;
+  }
+
+  if (window.Webflow && window.Webflow.push) {
+    window.Webflow.push(init);
+  } else if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>

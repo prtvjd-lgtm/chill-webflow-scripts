@@ -1,0 +1,1356 @@
+<!-- Анимация кисти -->
+<style>
+.tabs-brush-tab {
+  overflow: visible;
+  position: relative;
+  isolation: isolate;
+  cursor: pointer;
+}
+
+.tabs-brush-tab > *:not(.tab-brush-outline) {
+  position: relative;
+  z-index: 2;
+}
+
+.tab-brush-outline {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  transform: translate(-50%, -50%);
+  transform-origin: 50% 50%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  color: var(--tabs-brush-color, var(--main-orange));
+}
+
+.tabs-brush-tab.is-active > .tab-brush-outline {
+  opacity: 1;
+}
+
+.tab-brush-outline path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+</style>
+
+<script>
+(function () {
+  if (window.WebflowTabsBrush) return;
+
+  const state = {
+    brushColor: 'var(--main-orange)',
+    paddingX: 10,
+    paddingY: 6,
+    minWidth: 74,
+    minHeight: 32,
+    points: 24,
+    seed: 999,
+    startAngle: 0,
+    shapePower: 3.25,
+    heightScale: 0.95,
+    jitter: 3.1,
+    roughX: 0.82,
+    roughY: 1.19,
+    edgeSoftening: 1,
+    wave1Amp: 0.5,
+    wave1Freq: 0.5,
+    wave2Amp: 0.5,
+    wave2Freq: 1,
+    wave3Amp: 0.5,
+    wave3Freq: 3,
+    variantOffset: 0.81,
+    mainWidth: 2.25,
+    mainOpacity: 1,
+    secondWidth: 0.75,
+    secondOpacity: 1,
+    dryWidth: 1.5,
+    dryOpacity: 1,
+    scratchWidth: 1.2,
+    scratchOpacity: 1,
+    dashScale: 1.7,
+    gapScale: 2.2,
+    dashOffsetSpread: 27,
+    bristleCount: 54,
+    bristleLength: 44,
+    bristleSpread: 1.9,
+    bristleWidth: 0.525,
+    bristleOpacity: 1,
+    maskWidth: 9.75,
+    cutCount: 27,
+    cutLength: 11,
+    cutWidth: 5.55,
+    cutSpread: 0,
+    cutOpacity: 0.32,
+    filterEnabled: true,
+    filterType: 'fractalNoise',
+    filterScale: 3.7,
+    turbulenceX: 0.08,
+    turbulenceY: 0.18,
+    octaves: 7,
+    duration: 700
+  };
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const BRUSH_INSET = 4;
+  const SCALE_STATE = {
+    enabled: true,
+    referenceLabelWidth: 1040,
+    referenceLabelHeight: 40,
+    minSizeScale: 0.35,
+    maxSizeScale: 1.2,
+    minLengthScale: 0.18,
+    maxLengthScale: 1.2
+  };
+
+  let brushState = state;
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function round(value) {
+    return Math.round(value * 100) / 100;
+  }
+
+  function svgElement(tag, attributes) {
+    const element = document.createElementNS(SVG_NS, tag);
+
+    if (attributes) {
+      Object.keys(attributes).forEach(function (key) {
+        element.setAttribute(key, attributes[key]);
+      });
+    }
+
+    return element;
+  }
+
+  function randomFromSeed(seed) {
+    return function () {
+      seed |= 0;
+      seed = seed + 0x6d2b79f5 | 0;
+
+      let value = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      value = value + Math.imul(value ^ value >>> 7, 61 | value) ^ value;
+
+      return ((value ^ value >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  function getScaledBrushState(labelWidth, labelHeight) {
+    if (!SCALE_STATE.enabled) return state;
+
+    const sizeScale = clamp(
+      labelHeight / SCALE_STATE.referenceLabelHeight,
+      SCALE_STATE.minSizeScale,
+      SCALE_STATE.maxSizeScale
+    );
+    const lengthScale = clamp(
+      labelWidth / SCALE_STATE.referenceLabelWidth,
+      SCALE_STATE.minLengthScale,
+      SCALE_STATE.maxLengthScale
+    );
+    const runtime = Object.assign({}, state);
+    const sizeKeys = [
+      'jitter',
+      'wave1Amp',
+      'wave2Amp',
+      'wave3Amp',
+      'variantOffset',
+      'mainWidth',
+      'secondWidth',
+      'dryWidth',
+      'scratchWidth',
+      'dashOffsetSpread',
+      'bristleLength',
+      'bristleSpread',
+      'bristleWidth',
+      'maskWidth',
+      'cutLength',
+      'cutWidth',
+      'cutSpread',
+      'filterScale'
+    ];
+
+    sizeKeys.forEach(function (key) {
+      runtime[key] = state[key] * sizeScale;
+    });
+
+    runtime.bristleCount = Math.max(0, Math.round(state.bristleCount * lengthScale));
+    runtime.cutCount = Math.max(0, Math.round(state.cutCount * lengthScale));
+
+    return runtime;
+  }
+
+  function scaleDash(values) {
+    return values.map(function (value, index) {
+      const multiplier = index % 2 === 0 ? brushState.dashScale : brushState.gapScale;
+      return round(value * multiplier);
+    }).join(' ');
+  }
+
+  function smoothClosedPath(points) {
+    let d = 'M ' + round(points[0].x) + ' ' + round(points[0].y);
+    const total = points.length;
+
+    for (let i = 0; i < total; i += 1) {
+      const p0 = points[(i - 1 + total) % total];
+      const p1 = points[i];
+      const p2 = points[(i + 1) % total];
+      const p3 = points[(i + 2) % total];
+      const c1x = p1.x + (p2.x - p0.x) / 6;
+      const c1y = p1.y + (p2.y - p0.y) / 6;
+      const c2x = p2.x - (p3.x - p1.x) / 6;
+      const c2y = p2.y - (p3.y - p1.y) / 6;
+
+      d += ' C ' +
+        round(c1x) + ' ' + round(c1y) + ', ' +
+        round(c2x) + ' ' + round(c2y) + ', ' +
+        round(p2.x) + ' ' + round(p2.y);
+    }
+
+    return d;
+  }
+
+  function buildBrushPoints(width, height, seed, variant) {
+    const random = randomFromSeed(seed + variant * 997);
+    const points = [];
+    const cx = width / 2;
+    const cy = height / 2;
+    const rx = width / 2 - BRUSH_INSET - variant * brushState.variantOffset;
+    const ry = (height / 2 - BRUSH_INSET - variant * brushState.variantOffset * 0.6) * brushState.heightScale;
+    const power = 2 / (brushState.shapePower + variant * 0.08);
+    const startAngle = Math.PI * brushState.startAngle;
+
+    for (let i = 0; i < brushState.points; i += 1) {
+      const progress = i / brushState.points;
+      const angle = startAngle + progress * Math.PI * 2;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const xBase = Math.sign(cos) * Math.pow(Math.abs(cos), power) * rx;
+      const yBase = Math.sign(sin) * Math.pow(Math.abs(sin), power) * ry;
+      const wave =
+        Math.sin(angle * brushState.wave1Freq + seed * 0.001) * brushState.wave1Amp +
+        Math.sin(angle * brushState.wave2Freq + seed * 0.002) * brushState.wave2Amp +
+        Math.sin(angle * brushState.wave3Freq + seed * 0.003) * brushState.wave3Amp;
+      const edgeSoftener = 1 - Math.pow(Math.abs(cos), 8) * brushState.edgeSoftening;
+      const roughness = wave + (random() - 0.5) * brushState.jitter + (variant - 1) * brushState.variantOffset;
+
+      points.push({
+        x: cx + xBase + cos * roughness * brushState.roughX,
+        y: cy + yBase + sin * roughness * brushState.roughY * edgeSoftener
+      });
+    }
+
+    return points;
+  }
+
+  function buildBrushPath(width, height, seed, variant) {
+    return smoothClosedPath(buildBrushPoints(width, height, seed, variant));
+  }
+
+  function createFilter(id) {
+    const filter = svgElement('filter', {
+      id: id,
+      x: '-40%',
+      y: '-160%',
+      width: '180%',
+      height: '420%',
+      'color-interpolation-filters': 'sRGB'
+    });
+
+    filter.appendChild(svgElement('feTurbulence', {
+      type: brushState.filterType,
+      baseFrequency: brushState.turbulenceX + ' ' + brushState.turbulenceY,
+      numOctaves: brushState.octaves,
+      seed: brushState.seed,
+      result: 'noise'
+    }));
+
+    filter.appendChild(svgElement('feDisplacementMap', {
+      in: 'SourceGraphic',
+      in2: 'noise',
+      scale: brushState.filterScale,
+      xChannelSelector: 'R',
+      yChannelSelector: 'G'
+    }));
+
+    return filter;
+  }
+
+  function appendStroke(parent, width, height, variant, className, strokeWidth, opacity, dash) {
+    if (strokeWidth <= 0 || opacity <= 0) return;
+
+    const path = svgElement('path', {
+      class: className,
+      d: buildBrushPath(width, height, brushState.seed, variant),
+      stroke: brushState.brushColor,
+      'stroke-width': strokeWidth,
+      'stroke-opacity': opacity,
+      fill: 'none'
+    });
+
+    if (dash) {
+      path.setAttribute('stroke-dasharray', scaleDash(dash));
+      path.setAttribute('stroke-dashoffset', variant * brushState.dashOffsetSpread);
+    }
+
+    parent.appendChild(path);
+  }
+
+  function appendBristles(parent, width, height) {
+    if (brushState.bristleCount <= 0 || brushState.bristleWidth <= 0 || brushState.bristleOpacity <= 0) return;
+
+    const random = randomFromSeed(brushState.seed * 13 + 27);
+    const samples = buildBrushPoints(width, height, brushState.seed, 0);
+
+    for (let i = 0; i < brushState.bristleCount; i += 1) {
+      const index = Math.floor(random() * samples.length);
+      const p = samples[index];
+      const next = samples[(index + 1) % samples.length];
+      const prev = samples[(index - 1 + samples.length) % samples.length];
+      const tx = next.x - prev.x;
+      const ty = next.y - prev.y;
+      const tLength = Math.max(0.001, Math.hypot(tx, ty));
+      const nx = -ty / tLength;
+      const ny = tx / tLength;
+      const sign = random() > 0.5 ? 1 : -1;
+      const spread = (random() - 0.5) * brushState.bristleSpread * 2;
+      const len = brushState.bristleLength * (0.35 + random() * 0.9);
+      const startShift = (random() - 0.5) * len * 0.35;
+      const x1 = p.x + nx * spread + tx / tLength * startShift;
+      const y1 = p.y + ny * spread + ty / tLength * startShift;
+      const x2 = x1 + tx / tLength * len * sign + nx * (random() - 0.5) * brushState.bristleSpread;
+      const y2 = y1 + ty / tLength * len * sign + ny * (random() - 0.5) * brushState.bristleSpread;
+
+      parent.appendChild(svgElement('path', {
+        d: 'M ' + round(x1) + ' ' + round(y1) + ' L ' + round(x2) + ' ' + round(y2),
+        stroke: brushState.brushColor,
+        'stroke-width': brushState.bristleWidth,
+        'stroke-opacity': brushState.bristleOpacity * (0.45 + random() * 0.55),
+        fill: 'none'
+      }));
+    }
+  }
+
+  function appendCutMask(mask, width, height) {
+    if (brushState.cutCount <= 0 || brushState.cutWidth <= 0 || brushState.cutOpacity <= 0) return;
+
+    const random = randomFromSeed(brushState.seed * 17 + 113);
+    const samples = buildBrushPoints(width, height, brushState.seed, 0);
+
+    for (let i = 0; i < brushState.cutCount; i += 1) {
+      const index = Math.floor(random() * samples.length);
+      const p = samples[index];
+      const next = samples[(index + 1) % samples.length];
+      const prev = samples[(index - 1 + samples.length) % samples.length];
+      const tx = next.x - prev.x;
+      const ty = next.y - prev.y;
+      const tLength = Math.max(0.001, Math.hypot(tx, ty));
+      const nx = -ty / tLength;
+      const ny = tx / tLength;
+      const sign = random() > 0.5 ? 1 : -1;
+      const spread = (random() - 0.5) * brushState.cutSpread * 2;
+      const len = brushState.cutLength * (0.45 + random() * 1.1);
+      const x1 = p.x + nx * spread;
+      const y1 = p.y + ny * spread;
+      const x2 = x1 + tx / tLength * len * sign + nx * (random() - 0.5) * brushState.cutSpread;
+      const y2 = y1 + ty / tLength * len * sign + ny * (random() - 0.5) * brushState.cutSpread;
+
+      mask.appendChild(svgElement('path', {
+        d: 'M ' + round(x1) + ' ' + round(y1) + ' L ' + round(x2) + ' ' + round(y2),
+        stroke: '#000',
+        'stroke-width': brushState.cutWidth * (0.65 + random() * 0.7),
+        'stroke-opacity': brushState.cutOpacity,
+        'stroke-linecap': 'round',
+        fill: 'none'
+      }));
+    }
+  }
+
+  function animatePath(path) {
+    const length = path.getTotalLength();
+
+    path.style.transition = 'none';
+    path.style.strokeDasharray = length + ' ' + length;
+    path.style.strokeDashoffset = length;
+    path.getBoundingClientRect();
+    path.style.transition =
+      'stroke-dashoffset ' + brushState.duration + 'ms cubic-bezier(.22,.61,.36,1) 0ms';
+    path.style.strokeDashoffset = 0;
+  }
+
+  function prepare(tab) {
+    let brush = tab.querySelector(':scope > .tab-brush-outline');
+
+    tab.classList.add('tabs-brush-tab');
+
+    if (brush) return brush;
+
+    brush = svgElement('svg', {
+      class: 'tab-brush-outline',
+      'aria-hidden': 'true',
+      focusable: 'false'
+    });
+
+    tab.appendChild(brush);
+
+    return brush;
+  }
+
+  function draw(tab, options) {
+    if (!tab) return;
+
+    const settings = options || {};
+    const brush = prepare(tab);
+    const label = tab.querySelector(settings.labelSelector || '.text-caps') || tab;
+    const labelRect = label.getBoundingClientRect();
+    const tabRect = tab.getBoundingClientRect();
+
+    brushState = getScaledBrushState(labelRect.width, labelRect.height);
+    window.__tabsBrushRuntimeState = brushState;
+
+    const width = Math.max(
+      brushState.minWidth,
+      Math.ceil(labelRect.width + (brushState.paddingX + BRUSH_INSET) * 2)
+    );
+    const height = Math.max(
+      brushState.minHeight,
+      Math.ceil(labelRect.height + (brushState.paddingY / brushState.heightScale + BRUSH_INSET) * 2)
+    );
+    const centerX = labelRect.left - tabRect.left + labelRect.width / 2;
+    const centerY = labelRect.top - tabRect.top + labelRect.height / 2;
+
+    brush.innerHTML = '';
+    brush.style.width = width + 'px';
+    brush.style.height = height + 'px';
+    brush.style.left = centerX + 'px';
+    brush.style.top = centerY + 'px';
+    brush.style.color = brushState.brushColor;
+    brush.style.transform = 'translate(-50%, -50%)';
+    brush.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+
+    const ids = {
+      filter: 'brush-filter-' + Math.random().toString(36).slice(2),
+      mask: 'brush-mask-' + Math.random().toString(36).slice(2)
+    };
+    const defs = svgElement('defs');
+    const filter = createFilter(ids.filter);
+    const mask = svgElement('mask', {
+      id: ids.mask,
+      maskUnits: 'userSpaceOnUse',
+      x: 0,
+      y: 0,
+      width: width,
+      height: height
+    });
+    const basePath = buildBrushPath(width, height, brushState.seed, 0);
+    const maskPath = svgElement('path', {
+      d: basePath,
+      stroke: '#fff',
+      'stroke-width': brushState.maskWidth,
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round',
+      fill: 'none'
+    });
+
+    mask.appendChild(maskPath);
+    appendCutMask(mask, width, height);
+    defs.appendChild(filter);
+    defs.appendChild(mask);
+    brush.appendChild(defs);
+
+    const lines = svgElement('g', {
+      class: 'brush-lines',
+      mask: 'url(#' + ids.mask + ')'
+    });
+
+    if (brushState.filterEnabled) {
+      lines.setAttribute('filter', 'url(#' + ids.filter + ')');
+    }
+
+    appendStroke(lines, width, height, 1, 'brush-second', brushState.secondWidth, brushState.secondOpacity, [30, 4, 9, 3, 16, 5]);
+    appendStroke(lines, width, height, 0, 'brush-main', brushState.mainWidth, brushState.mainOpacity, null);
+    appendStroke(lines, width, height, 2, 'brush-dry', brushState.dryWidth, brushState.dryOpacity, [3, 9, 18, 6, 2, 11]);
+    appendStroke(lines, width, height, 3, 'brush-scratch', brushState.scratchWidth, brushState.scratchOpacity, [1, 12, 10, 8, 4, 14]);
+    appendBristles(lines, width, height);
+    brush.appendChild(lines);
+
+    if (settings.animate && brushState.duration > 0) {
+      animatePath(maskPath);
+    } else {
+      const length = maskPath.getTotalLength();
+      maskPath.style.strokeDasharray = length + ' ' + length;
+      maskPath.style.strokeDashoffset = 0;
+    }
+  }
+
+  window.WebflowTabsBrush = {
+    state: state,
+    prepare: prepare,
+    draw: draw
+  };
+
+  window.__tabsBrushState = state;
+  window.dispatchEvent(new CustomEvent('webflow-tabs-brush-ready'));
+})();
+</script>
+
+<!-- Табы с контентом -->
+<style>
+[data-tabs="group"],
+[data-tabs="tab"] {
+  overflow: visible;
+}
+
+[data-tabs="source"] {
+  display: none !important;
+}
+
+[data-tabs="output"] {
+  overflow-anchor: none;
+}
+</style>
+
+<script>
+(function () {
+  const SELECTORS = {
+    group: '[data-tabs="group"]',
+    tab: '[data-tabs="tab"]',
+    source: '[data-tabs="source"]',
+    output: '[data-tabs="output"]'
+  };
+
+  const TAB_STATE = {
+    activeClass: 'is-active',
+    labelSelector: '.text-caps'
+  };
+
+  const LINE_ANIMATION = {
+    duration: 600,
+    stagger: 70,
+    offsetY: 10,
+    easing: 'cubic-bezier(0.075, 0.82, 0.165, 1)'
+  };
+
+  const activeGroups = [];
+
+  function getBrush() {
+    return window.WebflowTabsBrush || null;
+  }
+
+  function drawBrush(tab, animate) {
+    const brush = getBrush();
+
+    if (!brush || !tab) return;
+
+    window.requestAnimationFrame(function () {
+      brush.draw(tab, {
+        animate: animate,
+        labelSelector: TAB_STATE.labelSelector
+      });
+    });
+  }
+
+  function prepareBrush(tab) {
+    const brush = getBrush();
+
+    if (brush && tab) {
+      brush.prepare(tab);
+    }
+  }
+
+  function animateElementHeight(element, changeContent) {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      changeContent();
+      return;
+    }
+
+    window.clearTimeout(element.__tabsHeightAnimationTimer);
+    element.removeEventListener('transitionend', element.__tabsHeightAnimationEnd);
+
+    const startHeight = element.getBoundingClientRect().height;
+
+    element.style.height = startHeight + 'px';
+    element.style.overflow = 'hidden';
+    element.style.transition = 'none';
+
+    changeContent();
+
+    element.style.height = 'auto';
+    const endHeight = element.getBoundingClientRect().height;
+    element.style.height = startHeight + 'px';
+
+    element.getBoundingClientRect();
+    element.style.transition =
+      'height ' + LINE_ANIMATION.duration + 'ms ' + LINE_ANIMATION.easing;
+    element.style.height = endHeight + 'px';
+
+    function cleanupHeight(event) {
+      if (event && (event.target !== element || event.propertyName !== 'height')) return;
+
+      window.clearTimeout(element.__tabsHeightAnimationTimer);
+      element.removeEventListener('transitionend', cleanupHeight);
+      element.style.height = '';
+      element.style.overflow = '';
+      element.style.transition = '';
+    }
+
+    element.__tabsHeightAnimationEnd = cleanupHeight;
+    element.addEventListener('transitionend', cleanupHeight);
+    element.__tabsHeightAnimationTimer = window.setTimeout(cleanupHeight, LINE_ANIMATION.duration + 80);
+  }
+
+  function clearOutputAnimation(output) {
+    const timers = output.__tabsLineAnimationTimers || [];
+
+    timers.forEach(function (timer) {
+      window.clearTimeout(timer);
+    });
+
+    output.__tabsLineAnimationTimers = [];
+  }
+
+  function getTextContainers(output) {
+    const explicit = Array.prototype.slice.call(output.querySelectorAll('[data-tabs-animate-text]'));
+
+    if (explicit.length) return explicit;
+
+    const children = Array.prototype.slice.call(output.children)
+      .filter(function (element) {
+        return element.textContent.trim();
+      });
+
+    if (children.length) return children;
+
+    return output.textContent.trim() ? [output] : [];
+  }
+
+  function splitElementIntoVisualLines(element) {
+    const text = element.textContent.replace(/\s+/g, ' ').trim();
+
+    if (!text) return [];
+
+    const words = text.split(' ');
+    const wordSpans = [];
+
+    element.textContent = '';
+
+    words.forEach(function (word, index) {
+      const span = document.createElement('span');
+
+      span.textContent = word + (index < words.length - 1 ? ' ' : '');
+      span.style.display = 'inline';
+      span.style.whiteSpace = 'pre-wrap';
+      element.appendChild(span);
+      wordSpans.push(span);
+    });
+
+    const groups = [];
+
+    wordSpans.forEach(function (span) {
+      const top = Math.round(span.offsetTop);
+      const lastGroup = groups[groups.length - 1];
+
+      if (!lastGroup || Math.abs(lastGroup.top - top) > 2) {
+        groups.push({
+          top: top,
+          spans: [span]
+        });
+        return;
+      }
+
+      lastGroup.spans.push(span);
+    });
+
+    element.textContent = '';
+
+    return groups.map(function (group) {
+      const line = document.createElement('span');
+      const lineText = group.spans.map(function (span) {
+        return span.textContent;
+      }).join('').trimEnd();
+
+      line.setAttribute('data-tabs-animate-line', 'true');
+      line.textContent = lineText;
+      line.style.display = 'block';
+      line.style.opacity = '0';
+      line.style.transform = 'translateY(' + LINE_ANIMATION.offsetY + 'px)';
+      line.style.transition = 'none';
+      element.appendChild(line);
+
+      return line;
+    });
+  }
+
+  function animateOutputText(output) {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    clearOutputAnimation(output);
+
+    const lines = getTextContainers(output).reduce(function (result, element) {
+      return result.concat(splitElementIntoVisualLines(element));
+    }, []);
+
+    if (!lines.length) return;
+
+    output.getBoundingClientRect();
+
+    window.requestAnimationFrame(function () {
+      lines.forEach(function (line, index) {
+        const timer = window.setTimeout(function () {
+          line.style.transition =
+            'opacity ' + LINE_ANIMATION.duration + 'ms ' + LINE_ANIMATION.easing + ', ' +
+            'transform ' + LINE_ANIMATION.duration + 'ms ' + LINE_ANIMATION.easing;
+          line.style.opacity = '1';
+          line.style.transform = 'translateY(0)';
+        }, index * LINE_ANIMATION.stagger);
+
+        output.__tabsLineAnimationTimers.push(timer);
+      });
+    });
+  }
+
+  function initTabs() {
+    document.querySelectorAll(SELECTORS.group).forEach(function (group) {
+      if (group.getAttribute('data-tabs-ready') === 'true') return;
+
+      const tabs = Array.prototype.slice.call(group.querySelectorAll(SELECTORS.tab));
+      const output = group.querySelector(SELECTORS.output);
+      const useBrush = group.getAttribute('data-tabs-brush') === 'true';
+
+      if (!tabs.length || !output) return;
+
+      group.setAttribute('data-tabs-ready', 'true');
+
+      function activateTab(tab, animate) {
+        const source = tab.querySelector(SELECTORS.source);
+
+        if (!source) return;
+
+        tabs.forEach(function (item) {
+          item.classList.remove(TAB_STATE.activeClass);
+        });
+
+        tab.classList.add(TAB_STATE.activeClass);
+
+        if (animate) {
+          animateElementHeight(output, function () {
+            output.innerHTML = source.innerHTML;
+            animateOutputText(output);
+          });
+        } else {
+          output.innerHTML = source.innerHTML;
+        }
+
+        if (useBrush) {
+          drawBrush(tab, animate);
+        }
+      }
+
+      tabs.forEach(function (tab) {
+        if (useBrush) {
+          prepareBrush(tab);
+        }
+
+        tab.addEventListener('click', function () {
+          activateTab(tab, true);
+        });
+      });
+
+      activateTab(group.querySelector(SELECTORS.tab + '.' + TAB_STATE.activeClass) || tabs[0], false);
+
+      activeGroups.push({
+        group: group,
+        tabs: tabs,
+        useBrush: useBrush
+      });
+    });
+  }
+
+  function refreshActiveBrushes() {
+    activeGroups.forEach(function (item) {
+      if (!item.useBrush) return;
+
+      const activeTab = item.group.querySelector(SELECTORS.tab + '.' + TAB_STATE.activeClass);
+
+      item.tabs.forEach(prepareBrush);
+
+      if (activeTab) {
+        drawBrush(activeTab, false);
+      }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initTabs);
+  } else {
+    initTabs();
+  }
+
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(refreshActiveBrushes);
+  }
+
+  window.addEventListener('webflow-tabs-brush-ready', refreshActiveBrushes);
+
+  window.addEventListener('resize', function () {
+    window.clearTimeout(window.tabsBrushResizeTimer);
+    window.tabsBrushResizeTimer = window.setTimeout(refreshActiveBrushes, 120);
+  });
+})();
+</script>
+
+<!-- Табы практик -->
+<style>
+[data-practice-tabs="group"],
+[data-practice-tab] {
+  overflow: visible;
+}
+
+.practice-block,
+.practice-list {
+  overflow-anchor: none;
+}
+</style>
+
+<script>
+(function () {
+  const ACTIVE_TAB_CLASS = 'is-active';
+  const PRACTICE_TAB_SELECTOR = '[data-practice-tab]';
+  const PRACTICE_CARD_SELECTOR = '[data-practice-card]';
+  const PRACTICE_TAG_SELECTOR = '[data-practice-card-tag]';
+  const HOVER_CARD_SELECTOR = '.practice-hover-card';
+  const HOVER_POSITION_SELECTOR = '[data-practice-hover-position="bounded"]';
+  const PRACTICE_BLOCK_SELECTOR = '.practice-block';
+  const PRACTICE_LIST_SELECTOR = '.practice-list';
+  const BRUSH_LABEL_SELECTOR = '.text-caps';
+  const HOVER_VIEWPORT_OFFSET = 24;
+  const HOVER_PRELOAD_ROOT_MARGIN = '1000px 0px';
+  const HOVER_CARD_MIN_VIEWPORT_WIDTH = 991;
+
+  const LIST_ANIMATION = {
+    duration: 600,
+    stagger: 70,
+    offsetY: 10,
+    easing: 'cubic-bezier(0.075, 0.82, 0.165, 1)'
+  };
+
+  const HOVER_ANIMATION = {
+    showDuration: 600,
+    showEasing: 'cubic-bezier(0.075, 0.82, 0.165, 1)',
+    offsetY: 20
+  };
+
+  let tabs = [];
+  let practices = [];
+  let hoverCards = [];
+  let activeHoverPractice = null;
+  let activeHoverCard = null;
+  let hoverHideTimer = null;
+  let hoverPositionFrame = null;
+  let hoverResizeObserver = null;
+  let hoverAssetsPreloaded = false;
+  let listAnimationTimers = [];
+  let resizeTimer = null;
+
+  function getBrush() {
+    return window.WebflowTabsBrush || null;
+  }
+
+  function normalize(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function canShowHoverCards() {
+    if (window.matchMedia) {
+      return window.matchMedia('(min-width: ' + HOVER_CARD_MIN_VIEWPORT_WIDTH + 'px)').matches;
+    }
+
+    return window.innerWidth >= HOVER_CARD_MIN_VIEWPORT_WIDTH;
+  }
+
+  function getPracticeTags(practice) {
+    return Array.from(practice.querySelectorAll(PRACTICE_TAG_SELECTOR))
+      .map(function (tag) {
+        return normalize(tag.textContent);
+      })
+      .filter(Boolean);
+  }
+
+  function usesBoundedHoverPosition(card) {
+    return card.matches(HOVER_POSITION_SELECTOR);
+  }
+
+  function prepareHoverCard(card) {
+    card.style.display = 'none';
+    card.style.visibility = '';
+    card.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
+    card.style.transition =
+      'transform ' + HOVER_ANIMATION.showDuration + 'ms ' + HOVER_ANIMATION.showEasing;
+    card.style.pointerEvents = 'none';
+
+    if (usesBoundedHoverPosition(card)) {
+      card.style.position = 'fixed';
+      card.style.left = HOVER_VIEWPORT_OFFSET + 'px';
+      card.style.top = '';
+      card.style.bottom = 'auto';
+    }
+  }
+
+  function getHoverPosition(card) {
+    const list = card.closest(PRACTICE_LIST_SELECTOR) || document.querySelector(PRACTICE_LIST_SELECTOR);
+    const listRect = list ? list.getBoundingClientRect() : null;
+    const cardHeight = card.getBoundingClientRect().height || card.offsetHeight;
+    const viewportBottom = window.innerHeight - HOVER_VIEWPORT_OFFSET;
+    const constrainedBottom = listRect ? Math.min(viewportBottom, listRect.bottom) : viewportBottom;
+    const minTop = listRect ? listRect.top : HOVER_VIEWPORT_OFFSET;
+    const rawTop = constrainedBottom - cardHeight;
+    const top = Math.max(minTop, rawTop);
+
+    return {
+      top: top
+    };
+  }
+
+  function positionHoverCard(card) {
+    if (!usesBoundedHoverPosition(card)) return null;
+
+    const position = getHoverPosition(card);
+
+    card.style.left = HOVER_VIEWPORT_OFFSET + 'px';
+    card.style.top = Math.round(position.top) + 'px';
+    card.style.bottom = 'auto';
+
+    return position;
+  }
+
+  function refreshActiveHoverCardPosition() {
+    if (
+      !activeHoverCard ||
+      activeHoverCard.style.display === 'none' ||
+      !usesBoundedHoverPosition(activeHoverCard)
+    ) return;
+
+    window.cancelAnimationFrame(hoverPositionFrame);
+    hoverPositionFrame = window.requestAnimationFrame(function () {
+      if (activeHoverCard && activeHoverCard.style.display !== 'none') {
+        positionHoverCard(activeHoverCard);
+      }
+    });
+  }
+
+  function observeActiveHoverCard(card) {
+    if (!window.ResizeObserver) return;
+
+    if (!hoverResizeObserver) {
+      hoverResizeObserver = new ResizeObserver(function () {
+        refreshActiveHoverCardPosition();
+      });
+    }
+
+    hoverResizeObserver.disconnect();
+    hoverResizeObserver.observe(card);
+  }
+
+  function stopObservingHoverCard() {
+    if (hoverResizeObserver) {
+      hoverResizeObserver.disconnect();
+    }
+  }
+
+  function preloadImage(image) {
+    image.loading = 'eager';
+    image.decoding = 'async';
+
+    const preload = new Image();
+
+    if (image.sizes) {
+      preload.sizes = image.sizes;
+    }
+
+    if (image.srcset) {
+      preload.srcset = image.srcset;
+    }
+
+    if (image.currentSrc || image.src) {
+      preload.src = image.currentSrc || image.src;
+    }
+
+    if (preload.decode) {
+      preload.decode().catch(function () {});
+    }
+  }
+
+  function preloadHoverCardAssets() {
+    if (hoverAssetsPreloaded) return;
+
+    hoverAssetsPreloaded = true;
+
+    hoverCards.forEach(function (card) {
+      Array.from(card.querySelectorAll('img')).forEach(preloadImage);
+    });
+  }
+
+  function setupHoverAssetPreload() {
+    const list = getPracticeList();
+
+    if (!list || !window.IntersectionObserver) {
+      preloadHoverCardAssets();
+      return;
+    }
+
+    const observer = new IntersectionObserver(function (entries) {
+      const shouldPreload = entries.some(function (entry) {
+        return entry.isIntersecting;
+      });
+
+      if (!shouldPreload) return;
+
+      preloadHoverCardAssets();
+      observer.disconnect();
+    }, {
+      rootMargin: HOVER_PRELOAD_ROOT_MARGIN,
+      threshold: 0
+    });
+
+    observer.observe(list);
+  }
+
+  function hideAllHoverCards() {
+    activeHoverPractice = null;
+    activeHoverCard = null;
+    window.clearTimeout(hoverHideTimer);
+    window.cancelAnimationFrame(hoverPositionFrame);
+    stopObservingHoverCard();
+
+    hoverCards.forEach(function (card) {
+      card.style.display = 'none';
+      card.style.visibility = '';
+      card.style.transition = 'none';
+      card.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
+    });
+  }
+
+  function showHoverCard(practice) {
+    if (!canShowHoverCards()) {
+      hideAllHoverCards();
+      return;
+    }
+
+    const hoverCard = practice.querySelector(HOVER_CARD_SELECTOR);
+
+    if (!hoverCard) return;
+
+    activeHoverPractice = practice;
+    activeHoverCard = hoverCard;
+    window.clearTimeout(hoverHideTimer);
+    window.cancelAnimationFrame(hoverPositionFrame);
+
+    hoverCards.forEach(function (card) {
+      if (card !== hoverCard) {
+        card.style.display = 'none';
+        card.style.visibility = '';
+        card.style.transition = 'none';
+        card.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
+      }
+    });
+
+    hoverCard.style.display = 'flex';
+    hoverCard.style.visibility = 'hidden';
+    hoverCard.style.transition = 'none';
+    hoverCard.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
+
+    requestAnimationFrame(function () {
+      if (activeHoverCard !== hoverCard || hoverCard.style.display === 'none') return;
+
+      positionHoverCard(hoverCard);
+      if (usesBoundedHoverPosition(hoverCard)) {
+        observeActiveHoverCard(hoverCard);
+      }
+      hoverCard.style.visibility = '';
+      hoverCard.getBoundingClientRect();
+
+      requestAnimationFrame(function () {
+        if (activeHoverCard !== hoverCard || hoverCard.style.display === 'none') return;
+
+        hoverCard.style.transition =
+          'transform ' + HOVER_ANIMATION.showDuration + 'ms ' + HOVER_ANIMATION.showEasing;
+        hoverCard.style.transform = 'translateY(0)';
+      });
+    });
+  }
+
+  function clearListAnimation() {
+    listAnimationTimers.forEach(function (timer) {
+      window.clearTimeout(timer);
+    });
+
+    listAnimationTimers = [];
+  }
+
+  function resetPracticeAnimationStyles(practice) {
+    practice.style.opacity = '';
+    practice.style.top = '';
+    practice.style.position = '';
+    practice.style.transition = '';
+  }
+
+  function getPracticeList() {
+    return document.querySelector(PRACTICE_LIST_SELECTOR);
+  }
+
+  function getPracticeBlock() {
+    return document.querySelector(PRACTICE_BLOCK_SELECTOR);
+  }
+
+  function getElementMinHeight(element) {
+    const minHeight = parseFloat(window.getComputedStyle(element).minHeight);
+
+    return Number.isFinite(minHeight) ? minHeight : 0;
+  }
+
+  function animateElementHeight(element, changeContent) {
+    if (!element) {
+      changeContent();
+      return;
+    }
+
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      changeContent();
+      return;
+    }
+
+    window.clearTimeout(element.__practiceHeightAnimationTimer);
+    element.removeEventListener('transitionend', element.__practiceHeightAnimationEnd);
+
+    const minHeight = getElementMinHeight(element);
+    const startHeight = Math.max(element.getBoundingClientRect().height, minHeight);
+
+    element.style.height = startHeight + 'px';
+    element.style.overflow = 'hidden';
+    element.style.transition = 'none';
+
+    changeContent();
+
+    element.style.height = 'auto';
+    const endHeight = Math.max(element.getBoundingClientRect().height, minHeight);
+    element.style.height = startHeight + 'px';
+
+    element.getBoundingClientRect();
+    element.style.transition =
+      'height ' + LIST_ANIMATION.duration + 'ms ' + LIST_ANIMATION.easing;
+    element.style.height = endHeight + 'px';
+
+    function cleanupHeight(event) {
+      if (event && (event.target !== element || event.propertyName !== 'height')) return;
+
+      window.clearTimeout(element.__practiceHeightAnimationTimer);
+      element.removeEventListener('transitionend', cleanupHeight);
+      element.style.height = '';
+      element.style.overflow = '';
+      element.style.transition = '';
+      refreshActiveHoverCardPosition();
+    }
+
+    element.__practiceHeightAnimationEnd = cleanupHeight;
+    element.addEventListener('transitionend', cleanupHeight);
+    element.__practiceHeightAnimationTimer = window.setTimeout(cleanupHeight, LIST_ANIMATION.duration + 80);
+  }
+
+  function animateVisiblePractices(visiblePractices) {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      visiblePractices.forEach(resetPracticeAnimationStyles);
+      return;
+    }
+
+    clearListAnimation();
+
+    visiblePractices.forEach(function (practice) {
+      practice.style.opacity = '0';
+      practice.style.position = 'relative';
+      practice.style.top = LIST_ANIMATION.offsetY + 'px';
+      practice.style.transition = 'none';
+    });
+
+    if (!visiblePractices.length) return;
+
+    visiblePractices[0].getBoundingClientRect();
+
+    window.requestAnimationFrame(function () {
+      visiblePractices.forEach(function (practice, index) {
+        const timer = window.setTimeout(function () {
+          practice.style.transition =
+            'opacity ' + LIST_ANIMATION.duration + 'ms ' + LIST_ANIMATION.easing + ', ' +
+            'top ' + LIST_ANIMATION.duration + 'ms ' + LIST_ANIMATION.easing;
+          practice.style.opacity = '1';
+          practice.style.top = '0';
+        }, index * LIST_ANIMATION.stagger);
+
+        listAnimationTimers.push(timer);
+      });
+
+      const cleanupDelay = (visiblePractices.length - 1) * LIST_ANIMATION.stagger + LIST_ANIMATION.duration + 80;
+      const cleanupTimer = window.setTimeout(function () {
+        visiblePractices.forEach(resetPracticeAnimationStyles);
+      }, cleanupDelay);
+
+      listAnimationTimers.push(cleanupTimer);
+    });
+  }
+
+  function drawBrush(tab, animate) {
+    const brush = getBrush();
+
+    if (!brush || !tab) return;
+
+    window.requestAnimationFrame(function () {
+      brush.draw(tab, {
+        animate: animate,
+        labelSelector: BRUSH_LABEL_SELECTOR
+      });
+    });
+  }
+
+  function setActiveTab(activeTab, animate) {
+    tabs.forEach(function (tab) {
+      const isActive = tab === activeTab;
+
+      tab.classList.toggle(ACTIVE_TAB_CLASS, isActive);
+      tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+
+    drawBrush(activeTab, animate);
+  }
+
+  function activateTab(activeTab, animate) {
+    const activeSlug = normalize(activeTab.getAttribute('data-practice-tab'));
+    let visiblePractices = [];
+
+    hideAllHoverCards();
+    clearListAnimation();
+    setActiveTab(activeTab, animate);
+
+    function updatePracticeVisibility() {
+      visiblePractices = [];
+
+      practices.forEach(function (practice) {
+        const tags = getPracticeTags(practice);
+        const shouldShow = tags.includes(activeSlug);
+
+        practice.style.display = shouldShow ? '' : 'none';
+
+        if (shouldShow) {
+          visiblePractices.push(practice);
+        } else {
+          resetPracticeAnimationStyles(practice);
+        }
+      });
+    }
+
+    if (animate) {
+      animateElementHeight(getPracticeBlock(), function () {
+        updatePracticeVisibility();
+        animateVisiblePractices(visiblePractices);
+      });
+    } else {
+      updatePracticeVisibility();
+      visiblePractices.forEach(resetPracticeAnimationStyles);
+    }
+  }
+
+  function prepareTabs() {
+    const brush = getBrush();
+
+    tabs.forEach(function (tab) {
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', 'false');
+
+      if (brush) {
+        brush.prepare(tab);
+      }
+
+      tab.addEventListener('click', function (event) {
+        event.preventDefault();
+        activateTab(tab, true);
+      });
+    });
+  }
+
+  function preparePractices() {
+    practices.forEach(function (practice) {
+      practice.addEventListener('mouseenter', function () {
+        if (practice.style.display === 'none' || !canShowHoverCards()) return;
+        showHoverCard(practice);
+      });
+
+      practice.addEventListener('mouseleave', function () {
+        if (activeHoverPractice === practice) {
+          hideAllHoverCards();
+        }
+      });
+    });
+  }
+
+  function refreshActiveBrush() {
+    const activeTab = document.querySelector(PRACTICE_TAB_SELECTOR + '.' + ACTIVE_TAB_CLASS);
+    const brush = getBrush();
+
+    if (brush) {
+      tabs.forEach(function (tab) {
+        brush.prepare(tab);
+      });
+    }
+
+    if (activeTab) {
+      drawBrush(activeTab, false);
+    }
+  }
+
+  function init() {
+    tabs = Array.from(document.querySelectorAll(PRACTICE_TAB_SELECTOR));
+    practices = Array.from(document.querySelectorAll(PRACTICE_CARD_SELECTOR));
+    hoverCards = Array.from(document.querySelectorAll(HOVER_CARD_SELECTOR));
+
+    if (!tabs.length) return;
+
+    prepareTabs();
+    hoverCards.forEach(prepareHoverCard);
+    preparePractices();
+    setupHoverAssetPreload();
+
+    activateTab(document.querySelector(PRACTICE_TAB_SELECTOR + '.' + ACTIVE_TAB_CLASS) || tabs[0], false);
+
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(refreshActiveBrush);
+    }
+
+    window.addEventListener('webflow-tabs-brush-ready', refreshActiveBrush);
+
+    window.addEventListener('resize', function () {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(function () {
+        if (!canShowHoverCards()) {
+          hideAllHoverCards();
+        }
+
+        refreshActiveBrush();
+        refreshActiveHoverCardPosition();
+      }, 120);
+    });
+
+    window.addEventListener('scroll', refreshActiveHoverCardPosition, { passive: true });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>

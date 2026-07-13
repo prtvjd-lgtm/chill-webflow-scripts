@@ -1,0 +1,63 @@
+{
+  "assetBaseUrl": "{{ASSET_BASE_URL}}",
+  "bundles": {
+    "global": {
+      "css": "global.css",
+      "js": "global.js",
+      "sources": [
+        "cmsPagination",
+        "header",
+        "howChoicePopup",
+        "studioMediaGallery",
+        "studioMap",
+        "contactsAnchor",
+        "siteNoise",
+        "tabsBrush",
+        "practiceTabs",
+        "practiceCardVideo",
+        "cmsFaq",
+        "practiceQueryNavigation"
+      ]
+    },
+    "home": {
+      "css": "home.css",
+      "js": "home.js",
+      "sources": [
+        "contentTabs",
+        "cmsLogoMarquee",
+        "offerTabs",
+        "pressureShape",
+        "reviewCmsSlider",
+        "referralScroll"
+      ]
+    },
+    "about": {
+      "css": "about.css",
+      "js": "about.js",
+      "sources": [
+        "aboutScrollBrush"
+      ]
+    },
+    "practice": {
+      "css": "practice.css",
+      "js": "practice.js",
+      "sources": [
+        "practiceDurationTabs"
+      ]
+    }
+  },
+  "pages": {
+    "/": [
+      "global",
+      "home"
+    ],
+    "/about": [
+      "global",
+      "about"
+    ],
+    "/practice": [
+      "global",
+      "practice"
+    ]
+  }
+}

@@ -1,0 +1,252 @@
+<!-- Появление поп-апа как выбрать -->
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const style = document.createElement("style");
+  style.textContent = `
+    [data-popup="true"] {
+      display: none;
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 9999 !important;
+    }
+
+    [data-popup="true"].is-visible {
+      display: flex !important;
+    }
+
+    [data-popup-bg="true"] {
+      position: absolute;
+      inset: 0;
+      background: rgba(61, 58, 56, 0.98);
+      opacity: 0;
+      z-index: 0;
+      cursor: pointer;
+      transition: opacity 500ms cubic-bezier(0, 0.55, 0.45, 1);
+    }
+
+    [data-popup-card="true"] {
+      position: relative;
+      z-index: 1;
+      top: 20px;
+      transition: top 500ms cubic-bezier(0, 0.55, 0.45, 1);
+    }
+
+    [data-popup="true"].is-active [data-popup-bg="true"] {
+      opacity: 1;
+    }
+
+    [data-popup="true"].is-active [data-popup-card="true"] {
+      top: 0;
+    }
+
+    [data-popup="true"].is-closing [data-popup-bg="true"] {
+      opacity: 0;
+      transition-duration: 200ms;
+      transition-timing-function: ease-out;
+      transition-delay: 100ms;
+    }
+
+    [data-popup="true"].is-closing [data-popup-card="true"] {
+      top: 20px;
+      transition-duration: 200ms;
+      transition-timing-function: ease-out;
+    }
+
+    [data-popup="true"].is-content-hidden [data-popup-card="true"] {
+      display: none !important;
+    }
+  `;
+  document.head.appendChild(style);
+
+  function prepareCardTilt(card) {
+    if (!card || card.__chillPopupTiltStarted) return;
+    card.__chillPopupTiltStarted = true;
+
+    const maxTilt = 2.6;
+    const responseCurve = 0.55;
+    const smoothing = 0.1;
+    let targetRotateX = 0;
+    let targetRotateY = 0;
+    let currentRotateX = 0;
+    let currentRotateY = 0;
+    let animationFrame = null;
+
+    card.style.transformStyle = "preserve-3d";
+    card.style.willChange = "transform";
+
+    function shapeTilt(value) {
+      const clampedValue = Math.max(-1, Math.min(1, value));
+      return Math.sign(clampedValue) * Math.pow(Math.abs(clampedValue), responseCurve);
+    }
+
+    function renderTilt() {
+      currentRotateX += (targetRotateX - currentRotateX) * smoothing;
+      currentRotateY += (targetRotateY - currentRotateY) * smoothing;
+
+      card.style.transform = `
+        perspective(1000px)
+        rotateX(${currentRotateX.toFixed(3)}deg)
+        rotateY(${currentRotateY.toFixed(3)}deg)
+      `;
+
+      if (
+        Math.abs(targetRotateX - currentRotateX) > 0.01 ||
+        Math.abs(targetRotateY - currentRotateY) > 0.01
+      ) {
+        animationFrame = requestAnimationFrame(renderTilt);
+      } else {
+        currentRotateX = targetRotateX;
+        currentRotateY = targetRotateY;
+        animationFrame = null;
+      }
+    }
+
+    function startTiltRender() {
+      if (!animationFrame) {
+        animationFrame = requestAnimationFrame(renderTilt);
+      }
+    }
+
+    card.addEventListener("mousemove", function (event) {
+      const rect = card.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+      const normalizedX = (x - centerX) / centerX;
+      const normalizedY = (y - centerY) / centerY;
+
+      targetRotateY = shapeTilt(normalizedX) * maxTilt;
+      targetRotateX = -shapeTilt(normalizedY) * maxTilt;
+
+      startTiltRender();
+    });
+
+    card.addEventListener("mouseleave", function () {
+      targetRotateX = 0;
+      targetRotateY = 0;
+
+      startTiltRender();
+    });
+  }
+
+  function closePopup(popup) {
+    const state = popup.__chillPopupState;
+    if (!state) return;
+
+    clearTimeout(state.closeTimer);
+    clearTimeout(state.contentHideTimer);
+
+    popup.classList.add("is-closing");
+    popup.classList.remove("is-active");
+
+    state.contentHideTimer = setTimeout(function () {
+      popup.classList.add("is-content-hidden");
+    }, 200);
+
+    state.closeTimer = setTimeout(function () {
+      popup.classList.remove("is-visible");
+      popup.classList.remove("is-closing");
+      popup.classList.remove("is-content-hidden");
+    }, 300);
+  }
+
+  function openPopup(popup) {
+    const state = popup.__chillPopupState;
+    if (!state) return;
+
+    clearTimeout(state.closeTimer);
+    clearTimeout(state.contentHideTimer);
+
+    popup.classList.remove("is-closing");
+    popup.classList.remove("is-content-hidden");
+    popup.classList.add("is-visible");
+
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        popup.classList.add("is-active");
+      });
+    });
+  }
+
+  function preparePopupForTrigger(trigger) {
+    const scope = trigger.closest('[data-popup-scope="true"]');
+    if (!scope) return null;
+
+    let popup = scope.__chillPopup || scope.querySelector('[data-popup="true"]');
+    if (!popup) return null;
+
+    scope.__chillPopup = popup;
+
+    if (popup.__chillPopupState) {
+      if (!document.body.contains(popup)) {
+        document.body.appendChild(popup);
+      }
+
+      return popup;
+    }
+
+    let bg = popup.querySelector('[data-popup-bg="true"]');
+    let content = popup.querySelector('[data-popup-card="true"]');
+
+    if (!bg) {
+      bg = document.createElement("div");
+      bg.setAttribute("data-popup-bg", "true");
+      popup.prepend(bg);
+    }
+
+    if (!content) {
+      content = Array.from(popup.children).find(function (child) {
+        return child.getAttribute("data-popup-bg") !== "true";
+      });
+
+      if (content) {
+        content.setAttribute("data-popup-card", "true");
+      }
+    }
+
+    popup.__chillPopupState = {
+      bg: bg,
+      content: content,
+      closeTimer: 0,
+      contentHideTimer: 0
+    };
+
+    if (content) {
+      prepareCardTilt(content);
+    }
+
+    if (bg) {
+      bg.addEventListener("click", function () {
+        closePopup(popup);
+      });
+    }
+
+    document.body.appendChild(popup);
+
+    return popup;
+  }
+
+  document.querySelectorAll('[data-popup-trigger="true"]').forEach(function (trigger) {
+    preparePopupForTrigger(trigger);
+  });
+
+  document.addEventListener("click", function (event) {
+    const trigger = event.target.closest('[data-popup-trigger="true"]');
+    if (!trigger) return;
+
+    const popup = preparePopupForTrigger(trigger);
+    if (!popup) return;
+
+    if (trigger.tagName === "A") {
+      event.preventDefault();
+    }
+
+    openPopup(popup);
+  });
+
+  document.querySelectorAll('[data-popup-card="true"]').forEach(function (card) {
+    prepareCardTilt(card);
+  });
+});
+</script>

@@ -1,0 +1,492 @@
+<!-- Табы продолжительности практик -->
+<style>
+  [data-practice-duration-text].is-clamped {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 5;
+  }
+</style>
+
+<script>
+(function () {
+  if (window.WebflowPracticeDurationTabs) return;
+
+  const SELECTORS = {
+    card: '[data-practice-duration-card]',
+    tab: '[data-practice-duration-tab]',
+    panel: '[data-practice-duration-panel]',
+    text: '[data-practice-duration-text]',
+    readMore: '[data-practice-duration-read-more]',
+    readMoreLabel: '[data-practice-duration-read-more-label]'
+  };
+
+  const ACTIVE_CLASS = 'is-active';
+  const CLAMPED_CLASS = 'is-clamped';
+  const EXPANDED_CLASS = 'is-expanded';
+  const APPEAR_ANIMATION = {
+    duration: 600,
+    stagger: 70,
+    offsetY: 10,
+    easing: 'cubic-bezier(0.075, 0.82, 0.165, 1)'
+  };
+
+  function normalize(value) {
+    return String(value || '').trim();
+  }
+
+  function getOwnedElements(card, selector) {
+    return Array.from(card.querySelectorAll(selector)).filter(function (element) {
+      return element.closest(SELECTORS.card) === card;
+    });
+  }
+
+  function isVisibleByCms(element) {
+    return window.getComputedStyle(element).display !== 'none';
+  }
+
+  function getBaseDisplay(element) {
+    if (element.__practiceDurationBaseDisplay) {
+      return element.__practiceDurationBaseDisplay;
+    }
+
+    const display = window.getComputedStyle(element).display;
+
+    element.__practiceDurationBaseDisplay = display === 'none' ? 'block' : display;
+
+    return element.__practiceDurationBaseDisplay;
+  }
+
+  function setElementVisibility(element, isVisible) {
+    element.style.display = isVisible ? getBaseDisplay(element) : 'none';
+    element.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+  }
+
+  function getDuration(element, attribute) {
+    return normalize(element.getAttribute(attribute));
+  }
+
+  function getPanelByDuration(state, duration) {
+    return state.panels.find(function (panel) {
+      return getDuration(panel, 'data-practice-duration-panel') === duration;
+    }) || null;
+  }
+
+  function getAvailableDurations(state) {
+    return state.tabs.reduce(function (durations, tab) {
+      const duration = getDuration(tab, 'data-practice-duration-tab');
+      const panel = getPanelByDuration(state, duration);
+
+      if (!duration || !panel || !tab.__practiceDurationCmsVisible || !panel.__practiceDurationCmsVisible) {
+        return durations;
+      }
+
+      if (!durations.includes(duration)) {
+        durations.push(duration);
+      }
+
+      return durations;
+    }, []);
+  }
+
+  function getActivePanel(state) {
+    return getPanelByDuration(state, state.activeDuration);
+  }
+
+  function getActiveText(state) {
+    const panel = getActivePanel(state);
+
+    return panel ? panel.querySelector(SELECTORS.text) : null;
+  }
+
+  function collapseText(text) {
+    if (!text) return;
+
+    text.classList.remove(EXPANDED_CLASS);
+    text.classList.add(CLAMPED_CLASS);
+  }
+
+  function expandText(text) {
+    if (!text) return;
+
+    text.classList.remove(CLAMPED_CLASS);
+    text.classList.add(EXPANDED_CLASS);
+  }
+
+  function prefersReducedMotion() {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  function rememberAppearanceStyles(element) {
+    if (element.__practiceDurationAppearanceStyles) {
+      return element.__practiceDurationAppearanceStyles;
+    }
+
+    element.__practiceDurationAppearanceStyles = {
+      opacity: element.style.opacity,
+      transform: element.style.transform,
+      transition: element.style.transition,
+      willChange: element.style.willChange
+    };
+
+    return element.__practiceDurationAppearanceStyles;
+  }
+
+  function restoreAppearanceStyles(element) {
+    const styles = element.__practiceDurationAppearanceStyles;
+
+    if (!styles) return;
+
+    element.style.opacity = styles.opacity;
+    element.style.transform = styles.transform;
+    element.style.transition = styles.transition;
+    element.style.willChange = styles.willChange;
+    delete element.__practiceDurationAppearanceStyles;
+    delete element.__practiceDurationAppearanceBaseTransform;
+  }
+
+  function clearAppearanceAnimation(state) {
+    window.cancelAnimationFrame(state.appearanceFrame);
+    state.appearanceTimers.forEach(function (timer) {
+      window.clearTimeout(timer);
+    });
+    state.appearanceTimers = [];
+    state.appearanceFrame = null;
+
+    state.appearanceElements.forEach(restoreAppearanceStyles);
+    state.appearanceElements = [];
+  }
+
+  function prepareAppearanceElement(state, element) {
+    const computedTransform = window.getComputedStyle(element).transform;
+
+    rememberAppearanceStyles(element);
+    element.__practiceDurationAppearanceBaseTransform = computedTransform === 'none' ? '' : computedTransform;
+    element.style.willChange = 'opacity, transform';
+    element.style.transition = 'none';
+    element.style.opacity = '0';
+    element.style.transform = element.__practiceDurationAppearanceBaseTransform
+      ? element.__practiceDurationAppearanceBaseTransform + ' translateY(' + APPEAR_ANIMATION.offsetY + 'px)'
+      : 'translateY(' + APPEAR_ANIMATION.offsetY + 'px)';
+    state.appearanceElements.push(element);
+  }
+
+  function finishAppearanceAnimation(state) {
+    state.appearanceTimers = [];
+    state.appearanceFrame = null;
+    state.appearanceElements.forEach(restoreAppearanceStyles);
+    state.appearanceElements = [];
+  }
+
+  function shouldShowReadMore(state) {
+    const text = getActiveText(state);
+
+    return Boolean(text && text.scrollHeight > text.clientHeight + 1);
+  }
+
+  function animateActiveContent(state) {
+    const text = getActiveText(state);
+    const showReadMore = shouldShowReadMore(state);
+    const elements = text ? [{ element: text, delay: 0 }] : [];
+
+    setReadMoreLabel(state, false);
+    setReadMoreVisibility(state, showReadMore);
+
+    if (showReadMore) {
+      state.readMore.forEach(function (button) {
+        elements.push({ element: button, delay: APPEAR_ANIMATION.stagger });
+      });
+    }
+
+    if (!elements.length || prefersReducedMotion()) return;
+
+    elements.forEach(function (item) {
+      prepareAppearanceElement(state, item.element);
+    });
+
+    text.getBoundingClientRect();
+
+    state.appearanceFrame = window.requestAnimationFrame(function () {
+      elements.forEach(function (item) {
+        const timer = window.setTimeout(function () {
+          item.element.style.transition =
+            'opacity ' + APPEAR_ANIMATION.duration + 'ms ' + APPEAR_ANIMATION.easing + ', ' +
+            'transform ' + APPEAR_ANIMATION.duration + 'ms ' + APPEAR_ANIMATION.easing;
+          item.element.style.opacity = '1';
+          item.element.style.transform = item.element.__practiceDurationAppearanceBaseTransform;
+        }, item.delay);
+
+        state.appearanceTimers.push(timer);
+      });
+
+      const cleanupTimer = window.setTimeout(function () {
+        finishAppearanceAnimation(state);
+      }, APPEAR_ANIMATION.stagger + APPEAR_ANIMATION.duration + 80);
+
+      state.appearanceTimers.push(cleanupTimer);
+    });
+  }
+
+  function setReadMoreVisibility(state, isVisible) {
+    state.readMore.forEach(function (button) {
+      setElementVisibility(button, isVisible);
+      button.setAttribute('aria-expanded', state.isExpanded ? 'true' : 'false');
+    });
+  }
+
+  function setReadMoreLabel(state, isExpanded) {
+    state.readMore.forEach(function (button) {
+      const label = button.querySelector(SELECTORS.readMoreLabel) || button;
+
+      if (label.__practiceDurationReadMoreLabel === undefined) {
+        label.__practiceDurationReadMoreLabel = label.textContent.trim();
+      }
+
+      label.textContent = isExpanded ? 'Показать меньше' : label.__practiceDurationReadMoreLabel;
+    });
+  }
+
+  function updateReadMore(state) {
+    if (state.isExpanded) {
+      setReadMoreLabel(state, true);
+      setReadMoreVisibility(state, true);
+      return;
+    }
+
+    setReadMoreLabel(state, false);
+    setReadMoreVisibility(state, shouldShowReadMore(state));
+  }
+
+  function getContentContainer(card, panels, readMore) {
+    const elements = panels.concat(readMore);
+
+    if (!elements.length) return null;
+
+    let container = elements[0].parentElement;
+
+    while (container && container !== card) {
+      const containsAllElements = elements.every(function (element) {
+        return container.contains(element);
+      });
+
+      if (containsAllElements) return container;
+
+      container = container.parentElement;
+    }
+
+    return null;
+  }
+
+  function getElementMinHeight(element) {
+    const minHeight = parseFloat(window.getComputedStyle(element).minHeight);
+
+    return Number.isFinite(minHeight) ? minHeight : 0;
+  }
+
+  function animateElementHeight(element, changeContent) {
+    if (!element || prefersReducedMotion()) {
+      changeContent();
+      return;
+    }
+
+    window.clearTimeout(element.__practiceDurationHeightTimer);
+    element.removeEventListener('transitionend', element.__practiceDurationHeightEnd);
+
+    const minHeight = getElementMinHeight(element);
+    const startHeight = Math.max(element.getBoundingClientRect().height, minHeight);
+
+    element.style.height = startHeight + 'px';
+    element.style.overflow = 'hidden';
+    element.style.transition = 'none';
+
+    changeContent();
+
+    element.style.height = 'auto';
+    const endHeight = Math.max(element.getBoundingClientRect().height, minHeight);
+    element.style.height = startHeight + 'px';
+
+    element.getBoundingClientRect();
+    element.style.transition =
+      'height ' + APPEAR_ANIMATION.duration + 'ms ' + APPEAR_ANIMATION.easing;
+    element.style.height = endHeight + 'px';
+
+    function cleanupHeight(event) {
+      if (event && (event.target !== element || event.propertyName !== 'height')) return;
+
+      window.clearTimeout(element.__practiceDurationHeightTimer);
+      element.removeEventListener('transitionend', cleanupHeight);
+      element.style.height = '';
+      element.style.overflow = '';
+      element.style.transition = '';
+    }
+
+    element.__practiceDurationHeightEnd = cleanupHeight;
+    element.addEventListener('transitionend', cleanupHeight);
+    element.__practiceDurationHeightTimer = window.setTimeout(
+      cleanupHeight,
+      APPEAR_ANIMATION.duration + 80
+    );
+  }
+
+  function selectDuration(state, duration, shouldAnimate) {
+    const availableDurations = getAvailableDurations(state);
+    const nextDuration = availableDurations.includes(duration) ? duration : availableDurations[0];
+    const shouldStyleActiveTab = availableDurations.length > 1;
+
+    if (!nextDuration) return;
+
+    function applyDurationState() {
+      state.activeDuration = nextDuration;
+      state.isExpanded = false;
+      clearAppearanceAnimation(state);
+
+      state.tabs.forEach(function (tab) {
+        const isActive = getDuration(tab, 'data-practice-duration-tab') === nextDuration;
+
+        tab.classList.toggle(ACTIVE_CLASS, isActive && shouldStyleActiveTab);
+        tab.style.pointerEvents = shouldStyleActiveTab ? '' : 'none';
+        tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        tab.setAttribute('tabindex', isActive ? '0' : '-1');
+      });
+
+      state.panels.forEach(function (panel) {
+        const isActive =
+          panel.__practiceDurationCmsVisible &&
+          getDuration(panel, 'data-practice-duration-panel') === nextDuration;
+
+        setElementVisibility(panel, isActive);
+        panel.classList.toggle(ACTIVE_CLASS, isActive);
+        collapseText(panel.querySelector(SELECTORS.text));
+      });
+
+      if (shouldAnimate) {
+        animateActiveContent(state);
+      } else {
+        updateReadMore(state);
+      }
+    }
+
+    if (shouldAnimate) {
+      animateElementHeight(state.contentContainer, applyDurationState);
+    } else {
+      applyDurationState();
+    }
+  }
+
+  function expandActiveText(state) {
+    const text = getActiveText(state);
+
+    if (!text) return;
+
+    clearAppearanceAnimation(state);
+
+    animateElementHeight(state.contentContainer, function () {
+      state.isExpanded = !state.isExpanded;
+
+      if (state.isExpanded) {
+        expandText(text);
+      } else {
+        collapseText(text);
+      }
+
+      updateReadMore(state);
+    });
+  }
+
+  function handleTabKeyboard(event, state, tab) {
+    const availableDurations = getAvailableDurations(state);
+    const currentIndex = availableDurations.indexOf(getDuration(tab, 'data-practice-duration-tab'));
+    let nextIndex = null;
+
+    if (currentIndex === -1) return;
+
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      nextIndex = (currentIndex + 1) % availableDurations.length;
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      nextIndex = (currentIndex - 1 + availableDurations.length) % availableDurations.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = availableDurations.length - 1;
+    }
+
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    selectDuration(state, availableDurations[nextIndex], true);
+
+    const nextTab = state.tabs.find(function (candidate) {
+      return getDuration(candidate, 'data-practice-duration-tab') === availableDurations[nextIndex];
+    });
+
+    if (nextTab) nextTab.focus();
+  }
+
+  function prepareCard(card, cardIndex) {
+    const state = {
+      tabs: getOwnedElements(card, SELECTORS.tab),
+      panels: getOwnedElements(card, SELECTORS.panel),
+      readMore: getOwnedElements(card, SELECTORS.readMore),
+      activeDuration: '',
+      isExpanded: false,
+      appearanceFrame: null,
+      appearanceTimers: [],
+      appearanceElements: []
+    };
+
+    state.contentContainer = getContentContainer(card, state.panels, state.readMore);
+
+    state.tabs.forEach(function (tab) {
+      tab.__practiceDurationCmsVisible = isVisibleByCms(tab);
+      tab.setAttribute('role', 'tab');
+
+      tab.addEventListener('click', function (event) {
+        event.preventDefault();
+        selectDuration(state, getDuration(tab, 'data-practice-duration-tab'), true);
+      });
+
+      tab.addEventListener('keydown', function (event) {
+        handleTabKeyboard(event, state, tab);
+      });
+    });
+
+    state.panels.forEach(function (panel) {
+      const duration = getDuration(panel, 'data-practice-duration-panel');
+      const panelId = 'practice-duration-panel-' + cardIndex + '-' + duration.replace(/[^a-z0-9_-]/gi, '-');
+      const tab = state.tabs.find(function (candidate) {
+        return getDuration(candidate, 'data-practice-duration-tab') === duration;
+      });
+
+      panel.__practiceDurationCmsVisible = isVisibleByCms(panel);
+      getBaseDisplay(panel);
+      panel.id = panelId;
+      panel.setAttribute('role', 'tabpanel');
+
+      if (tab) tab.setAttribute('aria-controls', panelId);
+    });
+
+    state.readMore.forEach(function (button) {
+      getBaseDisplay(button);
+
+      button.addEventListener('click', function (event) {
+        event.preventDefault();
+        expandActiveText(state);
+      });
+    });
+
+    selectDuration(state, getAvailableDurations(state)[0], false);
+  }
+
+  function init() {
+    Array.from(document.querySelectorAll(SELECTORS.card)).forEach(prepareCard);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  window.WebflowPracticeDurationTabs = true;
+})();
+</script>

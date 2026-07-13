@@ -1,0 +1,273 @@
+<!-- Навигация к практике через URL -->
+<script>
+(function () {
+  const ACTIVE_TAB_CLASS = 'is-active';
+  const QUERY_PARAM = 'practice';
+  const LINK_SELECTOR = '[data-practice-link-slug]';
+  const LINK_SLUG_ATTRIBUTE = 'data-practice-link-slug';
+  const TARGET_PATH_ATTRIBUTE = 'data-practice-link-path';
+  const DEFAULT_TARGET_PATH = '/practice';
+  const PRACTICE_CARD_SELECTOR = '[data-practice-card]';
+  const PRACTICE_SLUG_ATTRIBUTE = 'data-practice-slug';
+  const PRACTICE_TAG_SELECTOR = '[data-practice-card-tag]';
+  const PRACTICE_TAB_SELECTOR = '[data-practice-tab]';
+  const ACTIVE_TAB_SCROLL_DELAY = 120;
+  const TAB_SWITCH_SCROLL_DELAY = 720;
+  const MAX_SCROLL_ATTEMPTS = 30;
+  const SCROLL_DURATION = 1000;
+
+  function normalize(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function normalizeSlug(value) {
+    return String(value || '').trim();
+  }
+
+  function normalizePath(value) {
+    const path = String(value || '').trim() || DEFAULT_TARGET_PATH;
+
+    return path.charAt(0) === '/' ? path : '/' + path;
+  }
+
+  function buildPracticeUrl(path, slug) {
+    return normalizePath(path) + '?' + QUERY_PARAM + '=' + encodeURIComponent(slug);
+  }
+
+  function isLinkElement(element) {
+    return element.tagName.toLowerCase() === 'a';
+  }
+
+  function shouldIgnoreClick(event, element) {
+    const interactiveTarget = event.target.closest('a, button, input, textarea, select, label, [role="button"], [role="link"]');
+
+    return (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey ||
+      (interactiveTarget && interactiveTarget !== element)
+    );
+  }
+
+  function goToPracticeUrl(element) {
+    const url = element.__practiceQueryNavigationUrl;
+
+    if (url) {
+      window.location.href = url;
+    }
+  }
+
+  function prepareClickableElement(element) {
+    if (isLinkElement(element)) return;
+
+    if (!element.hasAttribute('role')) {
+      element.setAttribute('role', 'link');
+    }
+
+    if (!element.hasAttribute('tabindex')) {
+      element.setAttribute('tabindex', '0');
+    }
+
+    if (element.__practiceQueryNavigationReady) return;
+
+    element.__practiceQueryNavigationReady = true;
+
+    element.addEventListener('click', function (event) {
+      if (shouldIgnoreClick(event, element)) return;
+
+      goToPracticeUrl(element);
+    });
+
+    element.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+
+      event.preventDefault();
+      goToPracticeUrl(element);
+    });
+  }
+
+  function updatePracticeLinks() {
+    document.querySelectorAll(LINK_SELECTOR).forEach(function (element) {
+      const slug = normalizeSlug(element.getAttribute(LINK_SLUG_ATTRIBUTE));
+
+      if (!slug) return;
+
+      element.__practiceQueryNavigationUrl = buildPracticeUrl(element.getAttribute(TARGET_PATH_ATTRIBUTE), slug);
+
+      if (isLinkElement(element)) {
+        element.setAttribute('href', element.__practiceQueryNavigationUrl);
+      } else {
+        prepareClickableElement(element);
+      }
+    });
+  }
+
+  function getQuerySlug() {
+    return normalize(new URLSearchParams(window.location.search).get(QUERY_PARAM));
+  }
+
+  function getPracticeSlug(practice) {
+    const slugTarget = practice.hasAttribute(PRACTICE_SLUG_ATTRIBUTE)
+      ? practice
+      : practice.querySelector('[' + PRACTICE_SLUG_ATTRIBUTE + ']');
+
+    return slugTarget ? normalize(slugTarget.getAttribute(PRACTICE_SLUG_ATTRIBUTE)) : '';
+  }
+
+  function getPracticeTags(practice) {
+    return Array.from(practice.querySelectorAll(PRACTICE_TAG_SELECTOR))
+      .map(function (tag) {
+        return normalize(tag.textContent);
+      })
+      .filter(Boolean);
+  }
+
+  function findPracticeBySlug(slug) {
+    return Array.from(document.querySelectorAll(PRACTICE_CARD_SELECTOR)).find(function (practice) {
+      return getPracticeSlug(practice) === slug;
+    }) || null;
+  }
+
+  function findTabForPractice(practice) {
+    const tags = getPracticeTags(practice);
+    const tabs = Array.from(document.querySelectorAll(PRACTICE_TAB_SELECTOR));
+    const activeTab = tabs.find(function (tab) {
+      return tab.classList.contains(ACTIVE_TAB_CLASS);
+    });
+
+    if (
+      activeTab &&
+      tags.includes(normalize(activeTab.getAttribute('data-practice-tab')))
+    ) {
+      return activeTab;
+    }
+
+    return tabs.find(function (tab) {
+      return tags.includes(normalize(tab.getAttribute('data-practice-tab')));
+    }) || null;
+  }
+
+  function cubicBezier(progress, x1, y1, x2, y2) {
+    let lower = 0;
+    let upper = 1;
+    let percent = progress;
+
+    for (let i = 0; i < 12; i += 1) {
+      const x = bezier(percent, x1, x2);
+
+      if (Math.abs(x - progress) < 0.0001) break;
+
+      if (x < progress) {
+        lower = percent;
+      } else {
+        upper = percent;
+      }
+
+      percent = (upper + lower) / 2;
+    }
+
+    return bezier(percent, y1, y2);
+  }
+
+  function bezier(percent, point1, point2) {
+    const inverse = 1 - percent;
+
+    return 3 * inverse * inverse * percent * point1 +
+      3 * inverse * percent * percent * point2 +
+      percent * percent * percent;
+  }
+
+  function ease(progress) {
+    return cubicBezier(progress, 0.25, 0.1, 0.25, 1);
+  }
+
+  function getTargetScrollY(element) {
+    const rect = element.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const currentY = window.pageYOffset || document.documentElement.scrollTop || 0;
+    const targetY = currentY + rect.top - (viewportHeight - rect.height) / 2;
+    const maxY = Math.max(0, document.documentElement.scrollHeight - viewportHeight);
+
+    return Math.max(0, Math.min(maxY, targetY));
+  }
+
+  function scrollToPractice(element) {
+    const targetY = getTargetScrollY(element);
+    const startY = window.pageYOffset || document.documentElement.scrollTop || 0;
+    const distance = targetY - startY;
+
+    if (
+      Math.abs(distance) < 1 ||
+      (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    ) {
+      window.scrollTo(0, targetY);
+      return;
+    }
+
+    const startTime = performance.now();
+
+    function step(now) {
+      const progress = Math.min(1, (now - startTime) / SCROLL_DURATION);
+      const easedProgress = ease(progress);
+
+      window.scrollTo(0, startY + distance * easedProgress);
+
+      if (progress < 1) {
+        window.requestAnimationFrame(step);
+      }
+    }
+
+    window.requestAnimationFrame(step);
+  }
+
+  function scrollWhenVisible(practice, attempt) {
+    if (
+      attempt < MAX_SCROLL_ATTEMPTS &&
+      window.getComputedStyle(practice).display === 'none'
+    ) {
+      window.requestAnimationFrame(function () {
+        scrollWhenVisible(practice, attempt + 1);
+      });
+      return;
+    }
+
+    scrollToPractice(practice);
+  }
+
+  function openPracticeFromQuery() {
+    const slug = getQuerySlug();
+
+    if (!slug) return;
+
+    const practice = findPracticeBySlug(slug);
+
+    if (!practice) return;
+
+    const tab = findTabForPractice(practice);
+    let delay = ACTIVE_TAB_SCROLL_DELAY;
+
+    if (tab && !tab.classList.contains(ACTIVE_TAB_CLASS)) {
+      tab.click();
+      delay = TAB_SWITCH_SCROLL_DELAY;
+    }
+
+    window.setTimeout(function () {
+      scrollWhenVisible(practice, 0);
+    }, delay);
+  }
+
+  function init() {
+    updatePracticeLinks();
+    openPracticeFromQuery();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>

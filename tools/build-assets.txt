@@ -1,0 +1,171 @@
+<!-- build-webflow-assets -->
+const fs = require('fs');
+const path = require('path');
+const esbuild = require('esbuild');
+
+const ROOT = path.resolve(__dirname, '..');
+const SOURCE_DIR = path.join(ROOT, 'src', 'embeds');
+const DIST_DIR = path.join(ROOT, 'dist');
+const ASSET_BASE_URL = '{{ASSET_BASE_URL}}';
+
+function readSource(file) {
+  const source = fs.readFileSync(path.join(SOURCE_DIR, file), 'utf8');
+
+  if (!source.startsWith('<!--')) {
+    throw new Error(file + ': первая строка исходника должна быть HTML-комментарием.');
+  }
+
+  return source;
+}
+
+function getSection(file, startMarker, endMarker) {
+  const source = readSource(file);
+  const start = source.indexOf(startMarker);
+  const end = endMarker ? source.indexOf(endMarker, start + startMarker.length) : source.length;
+
+  if (start < 0 || end < 0) {
+    throw new Error(file + ': не найдена секция ' + startMarker);
+  }
+
+  return source.slice(start, end).trim();
+}
+
+function extractTag(source, tagName) {
+  const tag = new RegExp('<' + tagName + '\\b[^>]*>([\\s\\S]*?)<\\/' + tagName + '>', 'gi');
+  const parts = [];
+  let match;
+
+  while ((match = tag.exec(source))) {
+    const content = match[1].trim();
+    if (content) parts.push(content);
+  }
+
+  return parts.join('\n\n');
+}
+
+function writeFile(file, content) {
+  fs.writeFileSync(path.join(DIST_DIR, file), content.trim() + '\n', 'utf8');
+}
+
+function minify(content, loader) {
+  return esbuild.transformSync(content, {
+    loader: loader,
+    minify: true,
+    target: 'es2017',
+    legalComments: 'none'
+  }).code;
+}
+
+const embeds = {
+  cmsPagination: function () { return readSource('cms-pagination-script.txt'); },
+  header: function () { return readSource('header-switcher-script.txt'); },
+  howChoicePopup: function () { return readSource('how-choice-popup-script.txt'); },
+  studioMediaGallery: function () { return readSource('studio-media-gallery-script.txt'); },
+  studioMap: function () { return readSource('studio-map-yandex-script.txt'); },
+  contactsAnchor: function () { return readSource('contacts-anchor-scroll-script.txt'); },
+  siteNoise: function () { return readSource('site-noise-script.txt'); },
+  tabsBrush: function () {
+    return getSection(
+      'webflow-all-tabs-scripts.txt',
+      '<!-- Анимация кисти -->',
+      '<!-- Табы с контентом -->'
+    );
+  },
+  contentTabs: function () {
+    return getSection(
+      'webflow-all-tabs-scripts.txt',
+      '<!-- Табы с контентом -->',
+      '<!-- Табы практик -->'
+    );
+  },
+  practiceTabs: function () {
+    return getSection('webflow-all-tabs-scripts.txt', '<!-- Табы практик -->');
+  },
+  practiceCardVideo: function () { return readSource('practice-card-video-script.txt'); },
+  cmsFaq: function () { return readSource('cms-faq-accordion-script.txt'); },
+  practiceQueryNavigation: function () { return readSource('practice-query-navigation-script.txt'); },
+  cmsLogoMarquee: function () { return readSource('cms-logo-marquee-script.txt'); },
+  offerTabs: function () { return readSource('offer-tabs-script.txt'); },
+  pressureShape: function () { return readSource('pressure-shape-webflow-embed.txt'); },
+  reviewCmsSlider: function () { return readSource('review-cms-slider-script.txt'); },
+  referralScroll: function () { return readSource('referral-scroll-pinned-cms-animation.txt'); },
+  aboutScrollBrush: function () { return readSource('about-scroll-brush-script.txt'); },
+  practiceDurationTabs: function () { return readSource('practice-duration-tabs-script.txt'); }
+};
+
+const bundles = {
+  global: [
+    'cmsPagination',
+    'header',
+    'howChoicePopup',
+    'studioMediaGallery',
+    'studioMap',
+    'contactsAnchor',
+    'siteNoise',
+    'tabsBrush',
+    'practiceTabs',
+    'practiceCardVideo',
+    'cmsFaq',
+    'practiceQueryNavigation'
+  ],
+  home: [
+    'contentTabs',
+    'cmsLogoMarquee',
+    'offerTabs',
+    'pressureShape',
+    'reviewCmsSlider',
+    'referralScroll'
+  ],
+  about: ['aboutScrollBrush'],
+  practice: ['practiceDurationTabs']
+};
+
+const pages = {
+  '/': ['global', 'home'],
+  '/about': ['global', 'about'],
+  '/practice': ['global', 'practice']
+};
+
+fs.mkdirSync(DIST_DIR, { recursive: true });
+
+Object.keys(bundles).forEach(function (bundleName) {
+  const blocks = bundles[bundleName].map(function (embedName) {
+    if (!embeds[embedName]) throw new Error('Неизвестный Embed: ' + embedName);
+    return embeds[embedName]();
+  });
+  const css = blocks.map(function (block) { return extractTag(block, 'style'); }).filter(Boolean);
+  const js = blocks.map(function (block) { return extractTag(block, 'script'); }).filter(Boolean);
+
+  writeFile(bundleName + '.css', minify(css.join('\n\n'), 'css'));
+  writeFile(bundleName + '.js', minify(js.join('\n\n;\n\n'), 'js'));
+});
+
+const manifest = {
+  assetBaseUrl: ASSET_BASE_URL,
+  bundles: Object.keys(bundles).reduce(function (result, bundleName) {
+    result[bundleName] = {
+      css: bundleName + '.css',
+      js: bundleName + '.js',
+      sources: bundles[bundleName]
+    };
+    return result;
+  }, {}),
+  pages: pages
+};
+
+const snippets = Object.keys(pages).map(function (page) {
+  const bundleNames = pages[page];
+  const cssTags = bundleNames.map(function (bundleName) {
+    return '<link rel="stylesheet" href="' + ASSET_BASE_URL + '/' + bundleName + '.css">';
+  });
+  const jsTags = bundleNames.map(function (bundleName) {
+    return '<script defer src="' + ASSET_BASE_URL + '/' + bundleName + '.js"></script>';
+  });
+
+  return '<!-- ' + page + ' -->\n' + cssTags.concat(jsTags).join('\n');
+});
+
+writeFile('manifest.json', JSON.stringify(manifest, null, 2));
+writeFile('embed-snippets.html', snippets.join('\n\n'));
+
+console.log('Собрано бандлов: ' + Object.keys(bundles).join(', '));

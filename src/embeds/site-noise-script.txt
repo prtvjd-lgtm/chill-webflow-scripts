@@ -1,0 +1,136 @@
+<!-- Анимированный шум поверх сайта -->
+<style>
+  #site-noise {
+    position: fixed;
+    inset: 0;
+    z-index: 2147483647;
+    width: 100vw !important;
+    height: 100vh !important;
+    min-width: 100vw !important;
+    min-height: 100vh !important;
+    display: block;
+    pointer-events: none;
+    opacity: 0.1;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #site-noise {
+      display: none;
+    }
+  }
+</style>
+
+<canvas id="site-noise" aria-hidden="true"></canvas>
+
+<script>
+  (() => {
+    const canvas = document.getElementById('site-noise');
+
+    if (
+      !canvas ||
+      !canvas.getContext ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      return;
+    }
+
+    document.body.appendChild(canvas);
+
+    const settings = {
+      size: 160,
+      density: 0.20,
+      interval: 195,
+      multi: true
+    };
+
+    const context = canvas.getContext('2d');
+    const tile = document.createElement('canvas');
+    const tileContext = tile.getContext('2d');
+
+    let pixelRatio;
+    let imageData;
+    let timer;
+
+    const clamp = (value) => Math.max(0, Math.min(255, value));
+
+    function resize() {
+      pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+
+      canvas.style.setProperty('width', '100vw', 'important');
+      canvas.style.setProperty('height', '100vh', 'important');
+      canvas.style.setProperty('min-width', '100vw', 'important');
+      canvas.style.setProperty('min-height', '100vh', 'important');
+
+      canvas.width = Math.max(1, Math.round(window.innerWidth * pixelRatio));
+      canvas.height = Math.max(1, Math.round(window.innerHeight * pixelRatio));
+
+      tile.width = Math.round(settings.size * pixelRatio);
+      tile.height = Math.round(settings.size * pixelRatio);
+
+      imageData = tileContext.createImageData(tile.width, tile.height);
+      context.imageSmoothingEnabled = false;
+    }
+
+    function paintNoise() {
+      const pixels = imageData.data;
+
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (Math.random() > settings.density) {
+          pixels[index + 3] = 0;
+          continue;
+        }
+
+        const brightness = Math.floor(Math.random() * 256);
+        const colorShift = settings.multi ? 40 : 0;
+
+        pixels[index] = clamp(
+          brightness + (Math.random() - 0.5) * colorShift
+        );
+        pixels[index + 1] = clamp(
+          brightness + (Math.random() - 0.5) * colorShift
+        );
+        pixels[index + 2] = clamp(
+          brightness + (Math.random() - 0.5) * colorShift
+        );
+        pixels[index + 3] = 255;
+      }
+
+      tileContext.putImageData(imageData, 0, 0);
+
+      const pattern = context.createPattern(tile, 'repeat');
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = pattern;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function animate() {
+      paintNoise();
+      timer = window.setTimeout(animate, settings.interval);
+    }
+
+    function stopAnimation() {
+      window.clearTimeout(timer);
+      timer = undefined;
+    }
+
+    function startAnimation() {
+      if (!timer) animate();
+    }
+
+    resize();
+    startAnimation();
+
+    window.addEventListener('resize', () => {
+      resize();
+      paintNoise();
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        stopAnimation();
+      } else {
+        startAnimation();
+      }
+    });
+  })();
+</script>

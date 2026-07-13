@@ -1,0 +1,68 @@
+<!-- Скролл к контактам без отступа -->
+<script>
+(function () {
+  if (window.__chillContactsAnchorScrollStarted) return;
+  window.__chillContactsAnchorScrollStarted = true;
+
+  const TARGET_ID = 'contacts';
+  const LINK_SELECTOR = 'a[href="#contacts"]';
+
+  function shouldIgnoreClick(event) {
+    return (
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    );
+  }
+
+  function getScrollBehavior() {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ? 'auto'
+      : 'smooth';
+  }
+
+  function updateHash() {
+    const url = window.location.pathname + window.location.search + '#' + TARGET_ID;
+
+    window.history.pushState(null, '', url);
+  }
+
+  function scrollToContacts(event) {
+    if (shouldIgnoreClick(event)) return;
+
+    const target = document.getElementById(TARGET_ID);
+    if (!target) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const currentY = window.pageYOffset || document.documentElement.scrollTop || 0;
+    const targetY = Math.max(0, Math.round(currentY + target.getBoundingClientRect().top));
+
+    window.scrollTo({
+      top: targetY,
+      behavior: getScrollBehavior()
+    });
+
+    updateHash();
+  }
+
+  function init() {
+    document.querySelectorAll(LINK_SELECTOR).forEach(function (link) {
+      if (link.__chillContactsAnchorScrollReady) return;
+
+      link.__chillContactsAnchorScrollReady = true;
+      link.addEventListener('click', scrollToContacts);
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
+})();
+</script>

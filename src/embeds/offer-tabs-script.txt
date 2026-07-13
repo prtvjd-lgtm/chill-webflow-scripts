@@ -1,0 +1,980 @@
+<!-- CMS-табы офферов -->
+<style>
+[data-offer-tabs="group"],
+[data-offer-tab] {
+  overflow: visible;
+}
+
+</style>
+
+<script>
+(function () {
+  if (window.WebflowOfferTabs) return;
+
+  const SELECTORS = {
+    group: '[data-offer-tabs="group"]',
+    tab: '[data-offer-tab]',
+    panels: '[data-offer-tabs="panels"]',
+    panel: '[data-offer-panel]',
+    card: '[data-offer-card]',
+    cardStage: '[data-offer-card-stage]',
+    animated: '[data-offer-tabs-animate]'
+  };
+
+  const ACTIVE_CLASS = 'is-active';
+  const BRUSH_LABEL_SELECTOR = '.text-caps';
+  const ANIMATION = {
+    duration: 600,
+    stagger: 70,
+    offsetY: 10,
+    easing: 'cubic-bezier(0.075, 0.82, 0.165, 1)'
+  };
+  const CARD_SWAP = {
+    tabRaiseY: 0,
+    dropY: 180,
+    duration: 600,
+    easing: 'cubic-bezier(0.075, 0.82, 0.165, 1)'
+  };
+  const CARD_LAYERS = {
+    active: '0',
+    inactive: '-1'
+  };
+  const CARD_HOVER = {
+    stageOffsetY: 140,
+    canvasOffsetY: -280,
+    duration: 800,
+    easing: 'cubic-bezier(0.075, 0.82, 0.165, 1)',
+    boxShadow: '0 35px 32px 0 rgba(65, 56, 52, 0.08), 0 5px 23px 0 rgba(65, 56, 52, 0.10)',
+    perspective: 1000,
+    maxTilt: 6.825,
+    responseCurve: 0.55,
+    smoothing: 0.1
+  };
+
+  const activeGroups = [];
+
+  function normalize(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function makeIdentifier(value) {
+    return normalize(value).replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'item';
+  }
+
+  function getOwnedElements(group, selector) {
+    return Array.from(group.querySelectorAll(selector)).filter(function (element) {
+      return element.closest(SELECTORS.group) === group;
+    });
+  }
+
+  function reduceMotion() {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  function setVisibility(element, isVisible) {
+    const display = element.getAttribute('data-offer-display') || 'block';
+
+    element.style.display = isVisible ? display : 'none';
+    element.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+  }
+
+  function setCardLayer(card, isActive) {
+    card.style.zIndex = isActive ? CARD_LAYERS.active : CARD_LAYERS.inactive;
+  }
+
+  function getBaseCardMatrix(card) {
+    const transform = window.getComputedStyle(card).transform;
+    const match = /^matrix\(([^)]+)\)$/.exec(transform);
+
+    if (!match) {
+      return {
+        scaleX: 1,
+        scaleY: 1,
+        translateX: 0,
+        translateY: 0
+      };
+    }
+
+    const values = match[1].split(',').map(Number);
+    const scaleX = Math.sqrt(values[0] * values[0] + values[1] * values[1]) || 1;
+    const scaleY = Math.sqrt(values[2] * values[2] + values[3] * values[3]) || 1;
+
+    return {
+      scaleX: scaleX,
+      scaleY: scaleY,
+      translateX: values[4] || 0,
+      translateY: values[5] || 0
+    };
+  }
+
+  function getCardTransform(card, offsetY, rotateX, rotateY) {
+    const matrix = rememberRealCardStyles(card).matrix;
+    const baseTransform = 'matrix(' +
+      matrix.scaleX + ', 0, 0, ' + matrix.scaleY + ', ' +
+      matrix.translateX + ', ' + (matrix.translateY + offsetY) +
+      ')';
+
+    if (!rotateX && !rotateY) {
+      return baseTransform;
+    }
+
+    return 'perspective(' + CARD_HOVER.perspective + 'px) ' + baseTransform +
+      ' rotateX(' + rotateX.toFixed(3) + 'deg)' +
+      ' rotateY(' + rotateY.toFixed(3) + 'deg)';
+  }
+
+  function getBaseStageMatrix(stage) {
+    const transform = window.getComputedStyle(stage).transform;
+    const match = /^matrix\(([^)]+)\)$/.exec(transform);
+
+    if (!match) {
+      return {
+        a: 1,
+        b: 0,
+        c: 0,
+        d: 1,
+        translateX: 0,
+        translateY: 0
+      };
+    }
+
+    const values = match[1].split(',').map(Number);
+
+    return {
+      a: values[0],
+      b: values[1],
+      c: values[2],
+      d: values[3],
+      translateX: values[4] || 0,
+      translateY: values[5] || 0
+    };
+  }
+
+  function getStageTransform(stage, offsetY) {
+    const matrix = rememberCardStageStyles(stage).matrix;
+
+    return 'matrix(' +
+      matrix.a + ', ' + matrix.b + ', ' + matrix.c + ', ' + matrix.d + ', ' +
+      matrix.translateX + ', ' + (matrix.translateY + offsetY) +
+      ')';
+  }
+
+  function clearCardStageTimer(stage) {
+    window.clearTimeout(stage.__offerTabsCardStageTimer);
+    stage.__offerTabsCardStageTimer = null;
+  }
+
+  function rememberCardStageStyles(stage) {
+    if (stage.__offerTabsCardStageStyles) return stage.__offerTabsCardStageStyles;
+
+    stage.__offerTabsCardStageStyles = {
+      overflow: stage.style.overflow,
+      top: stage.style.top,
+      transform: stage.style.transform,
+      transition: stage.style.transition,
+      willChange: stage.style.willChange,
+      baseTop: Number.parseFloat(window.getComputedStyle(stage).top) || 0,
+      matrix: getBaseStageMatrix(stage)
+    };
+
+    return stage.__offerTabsCardStageStyles;
+  }
+
+  function restoreCardStage(stage) {
+    const styles = stage.__offerTabsCardStageStyles;
+
+    clearCardStageTimer(stage);
+
+    if (!styles) return;
+
+    stage.style.overflow = styles.overflow;
+    stage.style.top = styles.top;
+    stage.style.transform = styles.transform;
+    stage.style.transition = styles.transition;
+    stage.style.willChange = styles.willChange;
+    delete stage.__offerTabsCardStageStyles;
+  }
+
+  function setCardStageOffset(stage, offsetY, animate) {
+    if (!stage) return;
+
+    clearCardStageTimer(stage);
+    rememberCardStageStyles(stage);
+    stage.style.willChange = 'transform';
+    stage.style.transition = animate && !reduceMotion()
+      ? 'transform ' + CARD_HOVER.duration + 'ms ' + CARD_HOVER.easing
+      : 'none';
+    stage.style.transform = getStageTransform(stage, offsetY);
+  }
+
+  function setEnvelopeStageOffset(stage, offsetY, animate) {
+    if (!stage) return;
+
+    clearCardStageTimer(stage);
+    const styles = rememberCardStageStyles(stage);
+    const targetTop = styles.baseTop + offsetY;
+
+    stage.style.willChange = 'top';
+
+    if (!animate || reduceMotion()) {
+      stage.style.transition = 'none';
+      stage.style.top = targetTop + 'px';
+      return;
+    }
+
+    stage.style.transition = 'none';
+    stage.style.top = styles.baseTop + 'px';
+    stage.getBoundingClientRect();
+    stage.style.transition = 'top ' + CARD_HOVER.duration + 'ms ' + CARD_HOVER.easing;
+    stage.style.top = targetTop + 'px';
+  }
+
+  function resetCardStage(stage, animate) {
+    if (!stage || !stage.__offerTabsCardStageStyles) return;
+
+    clearCardStageTimer(stage);
+
+    if (!animate || reduceMotion()) {
+      restoreCardStage(stage);
+      return;
+    }
+
+    stage.style.transition = 'transform ' + CARD_HOVER.duration + 'ms ' + CARD_HOVER.easing;
+    stage.style.transform = getStageTransform(stage, 0);
+    stage.__offerTabsCardStageTimer = window.setTimeout(function () {
+      restoreCardStage(stage);
+    }, CARD_HOVER.duration + 40);
+  }
+
+  function resetEnvelopeStage(stage, animate) {
+    if (!stage || !stage.__offerTabsCardStageStyles) return;
+
+    clearCardStageTimer(stage);
+    const styles = stage.__offerTabsCardStageStyles;
+
+    if (!animate || reduceMotion()) {
+      restoreCardStage(stage);
+      return;
+    }
+
+    stage.style.willChange = 'top';
+    stage.style.transition = 'top ' + CARD_HOVER.duration + 'ms ' + CARD_HOVER.easing;
+    stage.style.top = styles.baseTop + 'px';
+    stage.__offerTabsCardStageTimer = window.setTimeout(function () {
+      restoreCardStage(stage);
+    }, CARD_HOVER.duration + 40);
+  }
+
+  function clearRealCardTimer(card) {
+    window.clearTimeout(card.__offerTabsRealCardTimer);
+    card.__offerTabsRealCardTimer = null;
+  }
+
+  function rememberRealCardStyles(card) {
+    if (card.__offerTabsRealCardStyles) return card.__offerTabsRealCardStyles;
+
+    card.__offerTabsRealCardStyles = {
+      transform: card.style.transform,
+      transition: card.style.transition,
+      matrix: getBaseCardMatrix(card)
+    };
+
+    return card.__offerTabsRealCardStyles;
+  }
+
+  function resetRealCard(card) {
+    const styles = card.__offerTabsRealCardStyles;
+
+    clearRealCardTimer(card);
+    card.__offerTabsRealCardIsActive = false;
+
+    if (!styles) return;
+
+    card.style.transform = styles.transform;
+    card.style.transition = styles.transition;
+    delete card.__offerTabsRealCardStyles;
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+  }
+
+  function prepareCardHover(card, canvas, stage, isCardActive) {
+    const hover = {
+      card: card,
+      canvas: canvas,
+      stage: stage,
+      isHovered: false,
+      isEnabled: false,
+      targetRotateX: 0,
+      targetRotateY: 0,
+      currentRotateX: 0,
+      currentRotateY: 0,
+      animationFrame: null,
+      presentation: null,
+      hoverBounds: null
+    };
+
+    function shapeTilt(value) {
+      const clampedValue = clamp(value, -1, 1);
+
+      return Math.sign(clampedValue) * Math.pow(Math.abs(clampedValue), CARD_HOVER.responseCurve);
+    }
+
+    function rememberPresentation() {
+      if (hover.presentation) return;
+
+      hover.presentation = {
+        transformStyle: card.style.transformStyle,
+        transition: card.style.transition,
+        willChange: card.style.willChange,
+        boxShadow: card.style.boxShadow,
+        computedBoxShadow: window.getComputedStyle(card).boxShadow
+      };
+    }
+
+    function getHoverBoxShadow() {
+      const baseShadow = hover.presentation && hover.presentation.computedBoxShadow;
+
+      return baseShadow && baseShadow !== 'none'
+        ? CARD_HOVER.boxShadow + ', ' + baseShadow
+        : CARD_HOVER.boxShadow;
+    }
+
+    function restorePresentation() {
+      if (!hover.presentation) return;
+
+      card.style.transformStyle = hover.presentation.transformStyle;
+      card.style.transition = hover.presentation.transition;
+      card.style.willChange = hover.presentation.willChange;
+      card.style.boxShadow = hover.presentation.boxShadow;
+      hover.presentation = null;
+    }
+
+    function renderTilt() {
+      if (!hover.isEnabled) {
+        hover.animationFrame = null;
+        return;
+      }
+
+      hover.currentRotateX += (hover.targetRotateX - hover.currentRotateX) * CARD_HOVER.smoothing;
+      hover.currentRotateY += (hover.targetRotateY - hover.currentRotateY) * CARD_HOVER.smoothing;
+
+      card.style.transform = getCardTransform(
+        card,
+        0,
+        hover.currentRotateX,
+        hover.currentRotateY
+      );
+      const isMoving =
+        Math.abs(hover.targetRotateX - hover.currentRotateX) > 0.01 ||
+        Math.abs(hover.targetRotateY - hover.currentRotateY) > 0.01;
+
+      if (isMoving) {
+        hover.animationFrame = window.requestAnimationFrame(renderTilt);
+        return;
+      }
+
+      hover.currentRotateX = hover.targetRotateX;
+      hover.currentRotateY = hover.targetRotateY;
+      hover.animationFrame = null;
+
+      if (!hover.isHovered) {
+        hover.isEnabled = false;
+        restorePresentation();
+      }
+    }
+
+    function startTiltRender() {
+      if (!hover.animationFrame) {
+        hover.animationFrame = window.requestAnimationFrame(renderTilt);
+      }
+    }
+
+    function updateTilt(event) {
+      if (!hover.isHovered || reduceMotion()) return;
+
+      const rect = card.getBoundingClientRect();
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+
+      if (!centerX || !centerY) return;
+
+      const normalizedX = (event.clientX - rect.left - centerX) / centerX;
+      const normalizedY = (event.clientY - rect.top - centerY) / centerY;
+
+      hover.targetRotateY = shapeTilt(normalizedX) * CARD_HOVER.maxTilt;
+      hover.targetRotateX = -shapeTilt(normalizedY) * CARD_HOVER.maxTilt;
+      startTiltRender();
+    }
+
+    function setHoverBounds() {
+      const rect = card.getBoundingClientRect();
+      const visibleOffsetY = CARD_HOVER.stageOffsetY + CARD_HOVER.canvasOffsetY;
+
+      hover.hoverBounds = {
+        left: rect.left,
+        right: rect.right,
+        top: Math.min(rect.top, rect.top + visibleOffsetY),
+        bottom: Math.max(rect.bottom, rect.bottom + visibleOffsetY)
+      };
+    }
+
+    function isInsideHoverBounds(event) {
+      const bounds = hover.hoverBounds;
+
+      if (!bounds) return false;
+
+      return event.clientX >= bounds.left && event.clientX <= bounds.right &&
+        event.clientY >= bounds.top && event.clientY <= bounds.bottom;
+    }
+
+    hover.activate = function (event) {
+      if (hover.isHovered || !isCardActive()) return;
+
+      hover.isHovered = true;
+      hover.isEnabled = true;
+      setHoverBounds();
+      rememberCardStageStyles(canvas);
+      rememberPresentation();
+      canvas.style.overflow = 'visible';
+      card.style.transformStyle = 'preserve-3d';
+      card.style.willChange = 'transform';
+      card.style.transition = 'box-shadow ' + CARD_HOVER.duration + 'ms ' + CARD_HOVER.easing;
+      card.style.boxShadow = getHoverBoxShadow();
+      setEnvelopeStageOffset(stage, CARD_HOVER.stageOffsetY, true);
+      setCardStageOffset(canvas, CARD_HOVER.canvasOffsetY, true);
+
+      if (reduceMotion()) {
+        return;
+      }
+
+      updateTilt(event);
+      startTiltRender();
+    };
+
+    hover.deactivate = function (animate) {
+      if (!hover.isHovered && !hover.isEnabled) return;
+
+      hover.isHovered = false;
+      hover.targetRotateX = 0;
+      hover.targetRotateY = 0;
+      resetEnvelopeStage(stage, animate);
+      resetCardStage(canvas, animate);
+      card.style.transition = animate && !reduceMotion()
+        ? 'box-shadow ' + CARD_HOVER.duration + 'ms ' + CARD_HOVER.easing
+        : 'none';
+      card.style.boxShadow = hover.presentation ? hover.presentation.boxShadow : '';
+
+      if (!animate || reduceMotion()) {
+        hover.isEnabled = false;
+        window.cancelAnimationFrame(hover.animationFrame);
+        hover.animationFrame = null;
+        card.style.transform = getCardTransform(card, 0);
+        restorePresentation();
+        return;
+      }
+
+      startTiltRender();
+    };
+
+    card.addEventListener('mouseenter', hover.activate);
+    card.addEventListener('mousemove', updateTilt);
+
+    document.addEventListener('mousemove', function (event) {
+      if (!hover.isHovered) return;
+
+      if (!isCardActive()) {
+        hover.deactivate(false);
+        return;
+      }
+
+      if (!isInsideHoverBounds(event)) {
+        hover.deactivate(true);
+        return;
+      }
+
+      updateTilt(event);
+    });
+
+    return hover;
+  }
+
+  function showRealCard(card, animate) {
+    if (!card) return;
+
+    clearRealCardTimer(card);
+
+    if (!animate || reduceMotion()) {
+      resetRealCard(card);
+      setVisibility(card, true);
+
+      if (animate && reduceMotion()) {
+        card.style.transform = getCardTransform(card, CARD_SWAP.tabRaiseY);
+      }
+
+      return;
+    }
+
+    card.__offerTabsRealCardIsActive = true;
+    setVisibility(card, true);
+    rememberRealCardStyles(card);
+    card.style.transition = 'none';
+    card.style.transform = getCardTransform(card, CARD_SWAP.dropY);
+    card.getBoundingClientRect();
+
+    window.requestAnimationFrame(function () {
+      if (!card.__offerTabsRealCardIsActive) return;
+
+      card.style.transition = 'transform ' + CARD_SWAP.duration + 'ms ' + CARD_SWAP.easing;
+      card.style.transform = getCardTransform(card, CARD_SWAP.tabRaiseY);
+    });
+  }
+
+  function hideRealCard(card, animate) {
+    if (!card) return;
+
+    clearRealCardTimer(card);
+    card.__offerTabsRealCardIsActive = false;
+
+    if (!animate || reduceMotion()) {
+      resetRealCard(card);
+      setVisibility(card, false);
+      return;
+    }
+
+    const styles = rememberRealCardStyles(card);
+
+    card.style.transition = 'transform ' + CARD_SWAP.duration + 'ms ' + CARD_SWAP.easing;
+    card.style.transform = getCardTransform(card, CARD_SWAP.dropY);
+    card.__offerTabsRealCardTimer = window.setTimeout(function () {
+      if (card.__offerTabsRealCardIsActive) return;
+
+      card.style.transform = styles.transform;
+      card.style.transition = styles.transition;
+      delete card.__offerTabsRealCardStyles;
+      setVisibility(card, false);
+    }, CARD_SWAP.duration + 40);
+  }
+
+  function getBrush() {
+    return window.WebflowTabsBrush || null;
+  }
+
+  function prepareBrush(tab) {
+    const brush = getBrush();
+
+    if (brush) {
+      brush.prepare(tab);
+    }
+  }
+
+  function drawBrush(tab, animate) {
+    const brush = getBrush();
+
+    if (!brush || !tab) return;
+
+    window.requestAnimationFrame(function () {
+      brush.draw(tab, {
+        animate: animate,
+        labelSelector: BRUSH_LABEL_SELECTOR
+      });
+    });
+  }
+
+  function rememberAnimatedStyles(element) {
+    if (element.__offerTabsAnimatedStyles) return;
+
+    element.__offerTabsAnimatedStyles = {
+      opacity: element.style.opacity,
+      transform: element.style.transform,
+      transition: element.style.transition
+    };
+  }
+
+  function restoreAnimatedStyles(element) {
+    const styles = element.__offerTabsAnimatedStyles;
+
+    if (!styles) return;
+
+    element.style.opacity = styles.opacity;
+    element.style.transform = styles.transform;
+    element.style.transition = styles.transition;
+    delete element.__offerTabsAnimatedStyles;
+  }
+
+  function getAnimatedElements(container, boundarySelector) {
+    const elements = [];
+
+    if (container.matches(SELECTORS.animated)) {
+      elements.push(container);
+    }
+
+    return elements.concat(Array.from(container.querySelectorAll(SELECTORS.animated)).filter(function (element) {
+      return element.closest(boundarySelector) === container;
+    }));
+  }
+
+  function clearContainerAnimation(container, boundarySelector) {
+    const timers = container.__offerTabsAnimationTimers || [];
+
+    timers.forEach(function (timer) {
+      window.clearTimeout(timer);
+    });
+
+    getAnimatedElements(container, boundarySelector).forEach(restoreAnimatedStyles);
+    container.__offerTabsAnimationTimers = [];
+  }
+
+  function animateContainer(container, boundarySelector) {
+    clearContainerAnimation(container, boundarySelector);
+
+    const elements = getAnimatedElements(container, boundarySelector);
+
+    if (!elements.length || reduceMotion()) return;
+
+    elements.forEach(function (element) {
+      rememberAnimatedStyles(element);
+      element.style.opacity = '0';
+      element.style.transform = 'translateY(' + ANIMATION.offsetY + 'px)';
+      element.style.transition = 'none';
+    });
+
+    container.getBoundingClientRect();
+
+    window.requestAnimationFrame(function () {
+      elements.forEach(function (element, index) {
+        const timer = window.setTimeout(function () {
+          element.style.transition =
+            'opacity ' + ANIMATION.duration + 'ms ' + ANIMATION.easing + ', ' +
+            'transform ' + ANIMATION.duration + 'ms ' + ANIMATION.easing;
+          element.style.opacity = '1';
+          element.style.transform = 'translateY(0)';
+        }, index * ANIMATION.stagger);
+
+        container.__offerTabsAnimationTimers.push(timer);
+      });
+
+      const cleanupTimer = window.setTimeout(function () {
+        elements.forEach(restoreAnimatedStyles);
+        container.__offerTabsAnimationTimers = [];
+      }, (elements.length - 1) * ANIMATION.stagger + ANIMATION.duration + 80);
+
+      container.__offerTabsAnimationTimers.push(cleanupTimer);
+    });
+  }
+
+  function animateElementHeight(element, changeContent) {
+    if (!element || reduceMotion()) {
+      changeContent();
+      return;
+    }
+
+    window.clearTimeout(element.__offerTabsHeightTimer);
+    element.removeEventListener('transitionend', element.__offerTabsHeightEnd);
+
+    const startHeight = element.getBoundingClientRect().height;
+
+    element.style.height = startHeight + 'px';
+    element.style.overflow = 'hidden';
+    element.style.transition = 'none';
+
+    changeContent();
+
+    element.style.height = 'auto';
+    const endHeight = element.getBoundingClientRect().height;
+
+    if (Math.abs(endHeight - startHeight) < 1) {
+      element.style.height = '';
+      element.style.overflow = '';
+      element.style.transition = '';
+      return;
+    }
+
+    element.style.height = startHeight + 'px';
+    element.getBoundingClientRect();
+    element.style.transition = 'height ' + ANIMATION.duration + 'ms ' + ANIMATION.easing;
+    element.style.height = endHeight + 'px';
+
+    function cleanup(event) {
+      if (event && (event.target !== element || event.propertyName !== 'height')) return;
+
+      window.clearTimeout(element.__offerTabsHeightTimer);
+      element.removeEventListener('transitionend', cleanup);
+      element.style.height = '';
+      element.style.overflow = '';
+      element.style.transition = '';
+    }
+
+    element.__offerTabsHeightEnd = cleanup;
+    element.addEventListener('transitionend', cleanup);
+    element.__offerTabsHeightTimer = window.setTimeout(cleanup, ANIMATION.duration + 80);
+  }
+
+  function initGroup(group, groupIndex) {
+    if (group.getAttribute('data-offer-tabs-ready') === 'true') return;
+
+    const tabs = getOwnedElements(group, SELECTORS.tab);
+    const panels = getOwnedElements(group, SELECTORS.panel);
+    const cards = getOwnedElements(group, SELECTORS.card);
+    const cardStage = cards.length ? cards[0].closest(SELECTORS.cardStage) : null;
+    const cardCanvas = cards.length && cards.every(function (card) {
+      return card.parentElement === cards[0].parentElement;
+    }) ? cards[0].parentElement : null;
+    const panelsContainer = group.querySelector(SELECTORS.panels);
+    const useBrush = group.getAttribute('data-offer-tabs-brush') === 'true';
+    const panelsByKey = new Map();
+    const cardsByKey = new Map();
+
+    panels.forEach(function (panel, panelIndex) {
+      const key = normalize(panel.getAttribute('data-offer-panel'));
+
+      if (!key || panelsByKey.has(key)) return;
+
+      panelsByKey.set(key, panel);
+
+      if (!panel.id) {
+        panel.id = 'offer-panel-' + groupIndex + '-' + panelIndex + '-' + makeIdentifier(key);
+      }
+
+      panel.setAttribute('role', 'tabpanel');
+    });
+
+    cards.forEach(function (card) {
+      const key = normalize(card.getAttribute('data-offer-card'));
+
+      if (!key || cardsByKey.has(key)) return;
+
+      cardsByKey.set(key, card);
+    });
+
+    const validTabs = tabs.filter(function (tab, tabIndex) {
+      const key = normalize(tab.getAttribute('data-offer-tab'));
+      const panel = panelsByKey.get(key);
+
+      if (!key || !panel) return false;
+
+      if (!tab.id) {
+        tab.id = 'offer-tab-' + groupIndex + '-' + tabIndex + '-' + makeIdentifier(key);
+      }
+
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-controls', panel.id);
+      panel.setAttribute('aria-labelledby', tab.id);
+
+      if (useBrush) {
+        prepareBrush(tab);
+      }
+
+      return true;
+    });
+
+    if (!validTabs.length) return;
+
+    group.setAttribute('data-offer-tabs-ready', 'true');
+
+    let activePanel = null;
+    let activeCard = null;
+    const cardHovers = new Map();
+
+    if (cardStage && cardCanvas) {
+      cards.forEach(function (card) {
+        cardHovers.set(card, prepareCardHover(card, cardCanvas, cardStage, function () {
+          return activeCard === card && card.style.display !== 'none';
+        }));
+      });
+
+      function activateCardHoverFromStage(event) {
+        if (!activeCard) return;
+
+        const hover = cardHovers.get(activeCard);
+        const rect = activeCard.getBoundingClientRect();
+        const isPointerOverCard = event.clientX >= rect.left && event.clientX <= rect.right &&
+          event.clientY >= rect.top && event.clientY <= rect.bottom;
+
+        if (hover && !hover.isHovered && isPointerOverCard) {
+          hover.activate(event);
+        }
+      }
+
+      cardStage.addEventListener('mouseenter', activateCardHoverFromStage);
+      cardStage.addEventListener('mousemove', activateCardHoverFromStage);
+    }
+
+    function clearCardHovers() {
+      cardHovers.forEach(function (hover) {
+        hover.deactivate(false);
+      });
+    }
+
+    function updateActiveCard(nextCard, animate) {
+      const previousCard = activeCard;
+
+      clearCardHovers();
+
+      cards.forEach(function (card) {
+        setCardLayer(card, card === nextCard);
+      });
+
+      if (!nextCard) {
+        if (previousCard) {
+          hideRealCard(previousCard, animate);
+        }
+
+        activeCard = null;
+        return;
+      }
+
+      cards.forEach(function (card) {
+        if (card === previousCard || card === nextCard) return;
+
+        resetRealCard(card);
+        setVisibility(card, false);
+      });
+
+      if (!animate) {
+        cards.forEach(function (card) {
+          if (card === nextCard) {
+            showRealCard(card, false);
+          } else {
+            resetRealCard(card);
+            setVisibility(card, false);
+          }
+        });
+      } else if (previousCard !== nextCard) {
+        if (previousCard) {
+          hideRealCard(previousCard, true);
+        }
+
+        showRealCard(nextCard, true);
+      } else {
+        setVisibility(nextCard, true);
+      }
+
+      activeCard = nextCard;
+    }
+
+    function applyState(activeTab, animate) {
+      const activeKey = normalize(activeTab.getAttribute('data-offer-tab'));
+      activePanel = panelsByKey.get(activeKey) || null;
+      const nextCard = cardsByKey.get(activeKey) || null;
+
+      tabs.forEach(function (tab) {
+        const isActive = tab === activeTab;
+
+        tab.classList.toggle(ACTIVE_CLASS, isActive);
+        tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        tab.tabIndex = isActive ? 0 : -1;
+      });
+
+      panels.forEach(function (panel) {
+        const isActive = panel === activePanel;
+
+        clearContainerAnimation(panel, SELECTORS.panel);
+        panel.classList.toggle(ACTIVE_CLASS, isActive);
+        setVisibility(panel, isActive);
+      });
+
+      updateActiveCard(nextCard, animate);
+
+      if (animate) {
+        animateContainer(activePanel, SELECTORS.panel);
+      }
+
+      if (useBrush) {
+        drawBrush(activeTab, animate);
+      }
+    }
+
+    function activateTab(activeTab, animate) {
+      if (!validTabs.includes(activeTab)) return;
+
+      animateElementHeight(panelsContainer, function () {
+        applyState(activeTab, animate);
+      });
+    }
+
+    validTabs.forEach(function (tab, index) {
+      tab.addEventListener('click', function (event) {
+        event.preventDefault();
+        activateTab(tab, true);
+      });
+
+      tab.addEventListener('keydown', function (event) {
+        let nextIndex = null;
+
+        if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+          nextIndex = (index + 1) % validTabs.length;
+        } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+          nextIndex = (index - 1 + validTabs.length) % validTabs.length;
+        } else if (event.key === 'Home') {
+          nextIndex = 0;
+        } else if (event.key === 'End') {
+          nextIndex = validTabs.length - 1;
+        } else if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          activateTab(tab, true);
+          return;
+        }
+
+        if (nextIndex === null) return;
+
+        event.preventDefault();
+        validTabs[nextIndex].focus();
+        activateTab(validTabs[nextIndex], true);
+      });
+    });
+
+    const initialTab = validTabs.find(function (tab) {
+      return tab.classList.contains(ACTIVE_CLASS);
+    }) || validTabs[0];
+
+    applyState(initialTab, false);
+
+    activeGroups.push({
+      group: group,
+      tabs: validTabs,
+      useBrush: useBrush
+    });
+  }
+
+  function refreshActiveBrushes() {
+    activeGroups.forEach(function (item) {
+      if (!item.useBrush) return;
+
+      const activeTab = item.tabs.find(function (tab) {
+        return tab.classList.contains(ACTIVE_CLASS);
+      });
+
+      item.tabs.forEach(prepareBrush);
+      drawBrush(activeTab, false);
+    });
+  }
+
+  function init() {
+    document.querySelectorAll(SELECTORS.group).forEach(initGroup);
+    refreshActiveBrushes();
+  }
+
+  window.WebflowOfferTabs = {
+    init: init
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(refreshActiveBrushes);
+  }
+
+  window.addEventListener('webflow-tabs-brush-ready', refreshActiveBrushes);
+
+  window.addEventListener('resize', function () {
+    window.clearTimeout(window.offerTabsResizeTimer);
+    window.offerTabsResizeTimer = window.setTimeout(refreshActiveBrushes, 120);
+  });
+})();
+</script>

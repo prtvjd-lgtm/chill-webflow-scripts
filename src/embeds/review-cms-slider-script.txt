@@ -1,0 +1,547 @@
+<!-- CMS-слайдер отзывов -->
+<style>
+[data-cms-slider="viewport"] {
+  overflow: hidden;
+}
+
+[data-cms-slider="track"] {
+  display: flex;
+  will-change: transform;
+  transition: transform 450ms cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+
+[data-cms-slider="item"] {
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+[data-cms-slider="dot"] {
+  background-color: #3D3A38;
+  opacity: 0.2;
+}
+
+[data-cms-slider="dot"].is-active {
+  background-color: #DC5B20;
+  opacity: 1;
+}
+
+[data-cms-slider="pagination"] {
+  display: none !important;
+}
+
+[data-cms-slider="prev"].is-disabled,
+[data-cms-slider="next"].is-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+[data-cms-slider="root"] .arrow-left,
+[data-cms-slider="root"] .arrow-right {
+  display: block !important;
+  position: fixed !important;
+  left: 0 !important;
+  top: 0 !important;
+  z-index: 9999 !important;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none !important;
+  transform: translate3d(var(--cms-slider-cursor-x, -100px), var(--cms-slider-cursor-y, -100px), 0) translate(-50%, -50%);
+  transition: opacity 120ms ease;
+}
+
+[data-cms-slider="root"].is-cms-slider-cursor-visible,
+[data-cms-slider="root"].is-cms-slider-cursor-visible * {
+  cursor: none !important;
+}
+
+[data-cms-slider="root"].is-cms-slider-cursor-visible .arrow-left.is-visible,
+[data-cms-slider="root"].is-cms-slider-cursor-visible .arrow-right.is-visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+@media (max-width: 991px) {
+  [data-cms-slider="viewport"] {
+    touch-action: pan-y;
+  }
+
+  [data-cms-slider="root"] .arrow-left,
+  [data-cms-slider="root"] .arrow-right {
+    display: none !important;
+  }
+
+  [data-cms-slider="root"].is-cms-slider-cursor-visible,
+  [data-cms-slider="root"].is-cms-slider-cursor-visible * {
+    cursor: auto !important;
+  }
+}
+</style>
+
+<script>
+(function () {
+  if (window.__chillReviewCmsSliderStarted) return;
+  window.__chillReviewCmsSliderStarted = true;
+
+  const ACTIVE_DOT_CLASS = 'is-active';
+  const DISABLED_CLASS = 'is-disabled';
+  const CURSOR_VISIBLE_CLASS = 'is-cms-slider-cursor-visible';
+  const VISIBLE_CLASS = 'is-visible';
+  const INTERACTIVE_SELECTOR = [
+    'a',
+    'button',
+    'input',
+    'textarea',
+    'select',
+    'label',
+    'summary',
+    '[role="button"]',
+    '[data-cms-slider-no-nav]',
+    '[data-cms-slider="dot"]',
+    '[data-cms-slider="prev"]',
+    '[data-cms-slider="next"]',
+    '[data-cms-slider="pagination"]'
+  ].join(',');
+
+  function selector(name) {
+    return '[data-cms-slider="' + name + '"]';
+  }
+
+  function getVisibleCount() {
+    if (window.innerWidth >= 992) return 3;
+    if (window.innerWidth >= 768) return 2;
+    return 1;
+  }
+
+  function isSwipeMode() {
+    return window.innerWidth < 992;
+  }
+
+  function initAllSliders() {
+    document.querySelectorAll(selector('root')).forEach(function (root, rootIndex) {
+      initSlider(root, rootIndex);
+    });
+  }
+
+  function initSlider(root, rootIndex) {
+    const viewport = root.querySelector(selector('viewport'));
+    const track = root.querySelector(selector('track'));
+    const prevButton = root.querySelector(selector('prev'));
+    const nextButton = root.querySelector(selector('next'));
+    const pagination = root.querySelector(selector('pagination'));
+    const cursorLeft = root.querySelector('.arrow-left');
+    const cursorRight = root.querySelector('.arrow-right');
+
+    if (!viewport || !track) return;
+
+    let items = getItems();
+    let currentIndex = 0;
+    let isLoading = false;
+    let resizeTimer = 0;
+    let preloadTimer = 0;
+    let loadingPromise = null;
+    let lastPointerEvent = null;
+    let swipeStartX = 0;
+    let swipeStartY = 0;
+    let swipeStartTime = 0;
+    let swipeStarted = false;
+    let loadedUrls = new Set([window.location.href]);
+    let nextPageUrl = getNextPageUrl(root, window.location.href);
+    let paginationController = null;
+
+    if (pagination) pagination.style.display = 'none';
+
+    function getItems() {
+      return Array.from(track.querySelectorAll(selector('item')));
+    }
+
+    function getGap() {
+      const styles = window.getComputedStyle(track);
+      const gap = parseFloat(styles.columnGap || styles.gap);
+
+      return Number.isFinite(gap) ? gap : 0;
+    }
+
+    function getMaxIndex() {
+      return Math.max(0, items.length - getVisibleCount());
+    }
+
+    function getStep() {
+      if (!items[0]) return 0;
+
+      if (items[1]) {
+        const firstRect = items[0].getBoundingClientRect();
+        const secondRect = items[1].getBoundingClientRect();
+        const measuredStep = Math.abs(secondRect.left - firstRect.left);
+
+        if (measuredStep > 0) return measuredStep;
+      }
+
+      return items[0].getBoundingClientRect().width + getGap();
+    }
+
+    function getNextPageUrl(sourceRoot, baseUrl) {
+      const nextLink = sourceRoot.querySelector(selector('load-next'));
+      if (!nextLink) return '';
+
+      const href = nextLink.getAttribute('href');
+      if (!href || href === '#') return '';
+
+      const url = new URL(href, baseUrl).toString();
+      if (loadedUrls.has(url)) return '';
+
+      return url;
+    }
+
+    function getMatchingRoot(doc) {
+      const sliderId = root.getAttribute('data-cms-slider-id');
+      const roots = Array.from(doc.querySelectorAll(selector('root')));
+
+      if (sliderId) {
+        return roots.find(function (item) {
+          return item.getAttribute('data-cms-slider-id') === sliderId;
+        });
+      }
+
+      return roots[rootIndex];
+    }
+
+    function applyLayout() {
+      items = getItems();
+
+      const visibleCount = getVisibleCount();
+      const gap = getGap();
+      const totalGap = gap * (visibleCount - 1);
+      const itemWidth = 'calc((100% - ' + totalGap + 'px) / ' + visibleCount + ')';
+
+      viewport.style.overflow = 'hidden';
+      track.style.display = 'flex';
+      track.style.willChange = 'transform';
+      track.style.transition = 'transform 450ms cubic-bezier(0.215, 0.61, 0.355, 1)';
+
+      items.forEach(function (item) {
+        item.style.boxSizing = 'border-box';
+        item.style.flex = '0 0 ' + itemWidth;
+        item.style.maxWidth = itemWidth;
+      });
+    }
+
+    function updatePosition() {
+      track.style.transform = 'translate3d(' + (-currentIndex * getStep()) + 'px, 0, 0)';
+    }
+
+    function setDisabled(button, disabled) {
+      if (!button) return;
+
+      button.classList.toggle(DISABLED_CLASS, disabled);
+      button.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+
+      if ('disabled' in button) {
+        button.disabled = disabled;
+      }
+    }
+
+    function updateButtons() {
+      setDisabled(prevButton, isLoading || currentIndex <= 0);
+      setDisabled(nextButton, isLoading || (!nextPageUrl && currentIndex >= getMaxIndex()));
+    }
+
+    function canGoPrev() {
+      return !isLoading && currentIndex > 0;
+    }
+
+    function canGoNext() {
+      return !isLoading && (Boolean(nextPageUrl) || currentIndex < getMaxIndex());
+    }
+
+    function updateDots() {
+      if (paginationController) paginationController.update(currentIndex);
+    }
+
+    function update() {
+      applyLayout();
+      currentIndex = Math.min(currentIndex, getMaxIndex());
+      updatePosition();
+      updateDots();
+      updateButtons();
+      updateCustomCursor();
+    }
+
+    function isInteractiveTarget(target) {
+      return Boolean(target && target.closest && target.closest(INTERACTIVE_SELECTOR));
+    }
+
+    function getPointerDirection(event) {
+      const rect = root.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+
+      return event.clientX < centerX ? -1 : 1;
+    }
+
+    function hideCustomCursor() {
+      root.classList.remove(CURSOR_VISIBLE_CLASS);
+
+      if (cursorLeft) cursorLeft.classList.remove(VISIBLE_CLASS);
+      if (cursorRight) cursorRight.classList.remove(VISIBLE_CLASS);
+    }
+
+    function updateCustomCursor(event) {
+      const pointerEvent = event || lastPointerEvent;
+
+      if (isSwipeMode()) {
+        hideCustomCursor();
+        return;
+      }
+
+      if (!pointerEvent || (!cursorLeft && !cursorRight) || !root.matches(':hover')) {
+        hideCustomCursor();
+        return;
+      }
+
+      if (isInteractiveTarget(pointerEvent.target)) {
+        hideCustomCursor();
+        return;
+      }
+
+      const direction = getPointerDirection(pointerEvent);
+      const showLeft = direction < 0;
+      const showRight = direction > 0;
+
+      if (!showLeft && !showRight) {
+        hideCustomCursor();
+        return;
+      }
+
+      root.style.setProperty('--cms-slider-cursor-x', pointerEvent.clientX + 'px');
+      root.style.setProperty('--cms-slider-cursor-y', pointerEvent.clientY + 'px');
+      root.classList.add(CURSOR_VISIBLE_CLASS);
+
+      if (cursorLeft) cursorLeft.classList.toggle(VISIBLE_CLASS, showLeft);
+      if (cursorRight) cursorRight.classList.toggle(VISIBLE_CLASS, showRight);
+    }
+
+    function preloadNextPage() {
+      if (!nextPageUrl || loadingPromise || preloadTimer) return;
+      if (getMaxIndex() - currentIndex > getVisibleCount()) return;
+
+      preloadTimer = window.setTimeout(function () {
+        preloadTimer = 0;
+
+        if (!nextPageUrl || loadingPromise) return;
+
+        loadNextPage({
+          silent: true
+        });
+      }, 120);
+    }
+
+    async function loadNextPage(options) {
+      const silent = Boolean(options && options.silent);
+
+      if (!nextPageUrl) return false;
+      if (loadingPromise) return loadingPromise;
+
+      if (!silent) {
+        isLoading = true;
+        updateButtons();
+      }
+
+      const loadingUrl = nextPageUrl;
+
+      loadingPromise = (async function () {
+        try {
+          loadedUrls.add(loadingUrl);
+
+          const response = await fetch(loadingUrl, {
+            credentials: 'same-origin'
+          });
+
+          if (!response.ok) throw new Error('Next CMS page request failed');
+
+          const html = await response.text();
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          const fetchedRoot = getMatchingRoot(doc);
+
+          if (!fetchedRoot) {
+            nextPageUrl = '';
+            return false;
+          }
+
+          const fetchedItems = Array.from(
+            fetchedRoot.querySelectorAll(selector('track') + ' ' + selector('item'))
+          );
+
+          fetchedItems.forEach(function (item) {
+            track.appendChild(document.importNode(item, true));
+          });
+
+          items = getItems();
+          nextPageUrl = getNextPageUrl(fetchedRoot, loadingUrl);
+
+          return fetchedItems.length > 0;
+        } catch (error) {
+          console.warn('Review CMS slider:', error);
+          nextPageUrl = '';
+          return false;
+        } finally {
+          loadingPromise = null;
+
+          if (!silent) {
+            isLoading = false;
+          }
+
+          update();
+        }
+      })();
+
+      return loadingPromise;
+    }
+
+    async function goTo(targetIndex) {
+      if (isLoading) return;
+
+      targetIndex = Math.max(0, targetIndex);
+
+      while (targetIndex > getMaxIndex() && nextPageUrl) {
+        const loaded = await loadNextPage();
+        if (!loaded) break;
+      }
+
+      currentIndex = Math.min(targetIndex, getMaxIndex());
+      update();
+      preloadNextPage();
+    }
+
+    function requestUpdate() {
+      window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(update, 150);
+    }
+
+    function handleSwipeStart(event) {
+      if (!isSwipeMode() || !event.touches || event.touches.length !== 1) return;
+      if (isInteractiveTarget(event.target)) return;
+
+      const touch = event.touches[0];
+
+      swipeStartX = touch.clientX;
+      swipeStartY = touch.clientY;
+      swipeStartTime = Date.now();
+      swipeStarted = true;
+    }
+
+    function handleSwipeEnd(event) {
+      if (!swipeStarted || !isSwipeMode() || !event.changedTouches || !event.changedTouches.length) return;
+
+      const touch = event.changedTouches[0];
+      const diffX = touch.clientX - swipeStartX;
+      const diffY = touch.clientY - swipeStartY;
+      const absX = Math.abs(diffX);
+      const absY = Math.abs(diffY);
+      const elapsed = Date.now() - swipeStartTime;
+
+      swipeStarted = false;
+
+      if (elapsed > 900 || absX < 45 || absX < absY * 1.25) return;
+
+      if (diffX < 0) {
+        goTo(currentIndex + 1);
+      } else {
+        goTo(currentIndex - 1);
+      }
+    }
+
+    if (window.ChillCmsPagination) {
+      paginationController = window.ChillCmsPagination.create({
+        getDots: function () {
+          return root.querySelectorAll(selector('dot'));
+        },
+        targetAttribute: 'data-cms-slider-target',
+        getTargetIndex: function (dotIndex, activeIndex, dotCount) {
+          return window.ChillCmsPagination.getWindowedTargetIndex(
+            dotIndex,
+            activeIndex,
+            dotCount,
+            getMaxIndex(),
+            Boolean(nextPageUrl)
+          );
+        },
+        onSelect: goTo
+      });
+    }
+
+    if (prevButton) {
+      prevButton.addEventListener('click', function (event) {
+        event.preventDefault();
+        if (isSwipeMode()) return;
+        goTo(currentIndex - 1);
+      });
+    }
+
+    if (nextButton) {
+      nextButton.addEventListener('click', function (event) {
+        event.preventDefault();
+        if (isSwipeMode()) return;
+        goTo(currentIndex + 1);
+      });
+    }
+
+    root.addEventListener('mousemove', function (event) {
+      lastPointerEvent = event;
+      updateCustomCursor(event);
+    });
+
+    root.addEventListener('mouseleave', function () {
+      lastPointerEvent = null;
+      hideCustomCursor();
+    });
+
+    root.addEventListener('click', function (event) {
+      if (isSwipeMode()) return;
+      if (isInteractiveTarget(event.target)) return;
+
+      const direction = getPointerDirection(event);
+
+      if (direction < 0) {
+        goTo(currentIndex - 1);
+      } else {
+        goTo(currentIndex + 1);
+      }
+    });
+
+    viewport.addEventListener('touchstart', handleSwipeStart, {
+      passive: true
+    });
+
+    viewport.addEventListener('touchend', handleSwipeEnd, {
+      passive: true
+    });
+
+    viewport.addEventListener('touchcancel', function () {
+      swipeStarted = false;
+    }, {
+      passive: true
+    });
+
+    window.addEventListener('resize', function () {
+      requestUpdate();
+    });
+
+    if (window.ResizeObserver) {
+      const observer = new ResizeObserver(requestUpdate);
+
+      observer.observe(root);
+      observer.observe(viewport);
+    }
+
+    update();
+    preloadNextPage();
+  }
+
+  if (window.Webflow && typeof window.Webflow.push === 'function') {
+    window.Webflow.push(initAllSliders);
+  } else if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAllSliders);
+  } else {
+    initAllSliders();
+  }
+})();
+</script>

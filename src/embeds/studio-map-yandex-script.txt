@@ -1,0 +1,563 @@
+<!-- Карта студий Яндекс -->
+<style>
+[data-studio-map="root"] {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+[data-studio-map-canvas] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+[data-studio-map-canvas] .ymaps3--main-engine-container > canvas {
+  filter: grayscale(1) contrast(1.08);
+}
+
+[data-studio-map-dimmer] {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: #3D3A38;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+[data-studio-map="root"].is-studio-map-popup-open [data-studio-map-dimmer] {
+  opacity: 0.1;
+}
+
+[data-studio-map-marker] {
+  position: absolute;
+  z-index: 1;
+  transform: translate(-50%, -50%);
+}
+
+[data-studio-map-marker-button] {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+[data-studio-map-marker-icon-wrap] {
+  position: relative;
+  display: block;
+}
+
+[data-studio-map-marker-icon] {
+  display: block;
+  max-width: none;
+  transition: opacity 180ms ease;
+}
+
+[data-studio-map-marker-icon="hover"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+
+[data-studio-map-marker].is-active [data-studio-map-marker-icon="default"] {
+  opacity: 0;
+}
+
+[data-studio-map-marker].is-active [data-studio-map-marker-icon="hover"] {
+  opacity: 1;
+}
+
+[data-studio-map-popup] {
+  position: absolute;
+  z-index: 1;
+  display: block;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 180ms ease, visibility 0s linear 180ms;
+}
+
+[data-studio-map-popup].is-active {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 180ms ease;
+}
+
+[data-studio-map-popup] > * {
+  max-width: 100%;
+}
+
+[data-studio-map="list"][data-studio-map-source-hidden="true"] {
+  display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-studio-map-dimmer],
+  [data-studio-map-popup],
+  [data-studio-map-marker-icon] {
+    transition: none;
+  }
+}
+</style>
+
+<script>
+(function () {
+  if (window.__chillStudioYandexMapStarted) return;
+  window.__chillStudioYandexMapStarted = true;
+
+  var API_URL = 'https://api-maps.yandex.ru/v3/';
+  var DEFAULT_ICON_URL = 'https://cdn.prod.website-files.com/6a46139bac7572cf853c2668/6a52b995ac6671f077100bc6_Frame%202147234340.svg';
+  var HOVER_ICON_URL = 'https://cdn.prod.website-files.com/6a46139bac7572cf853c2668/6a52ba0b34afa63ae214fce4_marker_hover.svg';
+  var POPUP_GAP = 16;
+  var SAFE_GAP = 8;
+  var MARKERS_LAYER_Z_INDEX = 3000;
+  var ACTIVE_MARKER_Z_INDEX = 1000;
+
+  function getMapId(element) {
+    return String(element.getAttribute('data-studio-map-id') || 'studios').trim();
+  }
+
+  function parseCoordinate(value) {
+    var parts = String(value || '')
+      .trim()
+      .replace(/[\[\]()]/g, '')
+      .split(/[;,\s]+/)
+      .filter(Boolean)
+      .map(Number);
+
+    if (parts.length !== 2 || !Number.isFinite(parts[0]) || !Number.isFinite(parts[1])) return null;
+    if (parts[0] < -90 || parts[0] > 90 || parts[1] < -180 || parts[1] > 180) return null;
+
+    return [parts[1], parts[0]];
+  }
+
+  function getSourceLists(mapId) {
+    return Array.prototype.filter.call(document.querySelectorAll('[data-studio-map="list"]'), function (list) {
+      return getMapId(list) === mapId;
+    });
+  }
+
+  function getSourceItems(sourceLists) {
+    var items = [];
+
+    sourceLists.forEach(function (list) {
+      Array.prototype.forEach.call(list.querySelectorAll('[data-studio-map-coordinates]'), function (item) {
+        if (item.closest('[data-studio-map="list"]') === list) items.push(item);
+      });
+    });
+
+    return items;
+  }
+
+  function getBounds(points) {
+    var minLng = Infinity;
+    var minLat = Infinity;
+    var maxLng = -Infinity;
+    var maxLat = -Infinity;
+
+    points.forEach(function (point) {
+      minLng = Math.min(minLng, point.coordinates[0]);
+      minLat = Math.min(minLat, point.coordinates[1]);
+      maxLng = Math.max(maxLng, point.coordinates[0]);
+      maxLat = Math.max(maxLat, point.coordinates[1]);
+    });
+
+    return [[minLng, minLat], [maxLng, maxLat]];
+  }
+
+  function getInitialLocation(root, points) {
+    var bounds = getBounds(points);
+    var samePoint = bounds[0][0] === bounds[1][0] && bounds[0][1] === bounds[1][1];
+    var configuredZoom = Number(root.getAttribute('data-studio-map-zoom'));
+    var zoom = Number.isFinite(configuredZoom) ? configuredZoom : 13;
+
+    if (samePoint) {
+      return {
+        center: points[0].coordinates,
+        zoom: zoom
+      };
+    }
+
+    return { bounds: bounds };
+  }
+
+  function loadYandexApi(apiKey) {
+    if (window.ymaps3) return Promise.resolve(window.ymaps3);
+    if (window.__chillYandexMapApiPromise) return window.__chillYandexMapApiPromise;
+
+    window.__chillYandexMapApiPromise = new Promise(function (resolve, reject) {
+      var script = document.createElement('script');
+      var url = new URL(API_URL);
+
+      url.searchParams.set('apikey', apiKey);
+      url.searchParams.set('lang', 'ru_RU');
+      script.src = url.href;
+      script.async = true;
+      script.dataset.chillYandexMapApi = 'true';
+      script.onload = function () {
+        if (window.ymaps3) {
+          resolve(window.ymaps3);
+        } else {
+          reject(new Error('Яндекс Карты загрузились без объекта ymaps3.'));
+        }
+      };
+      script.onerror = function () {
+        reject(new Error('Не удалось загрузить JavaScript API Яндекс Карт.'));
+      };
+
+      document.head.appendChild(script);
+    });
+
+    return window.__chillYandexMapApiPromise;
+  }
+
+  function cloneCard(card) {
+    var clone = card.cloneNode(true);
+
+    clone.removeAttribute('data-studio-map');
+    clone.removeAttribute('id');
+    Array.prototype.forEach.call(clone.querySelectorAll('[id]'), function (element) {
+      element.removeAttribute('id');
+    });
+    Array.prototype.forEach.call(clone.querySelectorAll('img[loading="lazy"]'), function (image) {
+      image.loading = 'eager';
+    });
+
+    return clone;
+  }
+
+  function createDimmer(canvas) {
+    var dimmer = document.createElement('div');
+    var markerLayer = canvas.querySelector('.ymaps3--marker-layer');
+
+    dimmer.setAttribute('data-studio-map-dimmer', '');
+    dimmer.setAttribute('aria-hidden', 'true');
+
+    if (markerLayer && markerLayer.parentElement) {
+      markerLayer.parentElement.insertBefore(dimmer, markerLayer);
+    } else {
+      canvas.appendChild(dimmer);
+    }
+
+    return dimmer;
+  }
+
+  function createCanvas(root) {
+    var canvas = document.createElement('div');
+    canvas.setAttribute('data-studio-map-canvas', '');
+    root.appendChild(canvas);
+    return canvas;
+  }
+
+  function isInsideBounds(candidate, mapWidth, mapHeight) {
+    return candidate.x >= SAFE_GAP &&
+      candidate.y >= SAFE_GAP &&
+      candidate.x + candidate.width <= mapWidth - SAFE_GAP &&
+      candidate.y + candidate.height <= mapHeight - SAFE_GAP;
+  }
+
+  function getVisibleArea(candidate, mapWidth, mapHeight) {
+    var left = Math.max(SAFE_GAP, candidate.x);
+    var top = Math.max(SAFE_GAP, candidate.y);
+    var right = Math.min(mapWidth - SAFE_GAP, candidate.x + candidate.width);
+    var bottom = Math.min(mapHeight - SAFE_GAP, candidate.y + candidate.height);
+
+    return Math.max(0, right - left) * Math.max(0, bottom - top);
+  }
+
+  function getPopupPosition(root, markerButton, popup) {
+    var rootRect = root.getBoundingClientRect();
+    var markerRect = markerButton.getBoundingClientRect();
+    var popupRect = popup.getBoundingClientRect();
+    var mapWidth = rootRect.width;
+    var mapHeight = rootRect.height;
+    var markerX = markerRect.left - rootRect.left;
+    var markerY = markerRect.top - rootRect.top;
+    var markerCenterX = markerX + markerRect.width / 2;
+    var markerCenterY = markerY + markerRect.height / 2;
+    var popupWidth = popupRect.width;
+    var popupHeight = popupRect.height;
+    var candidates = [
+      {
+        side: 'bottom',
+        x: markerCenterX - popupWidth / 2,
+        y: markerY + markerRect.height + POPUP_GAP,
+        width: popupWidth,
+        height: popupHeight
+      },
+      {
+        side: 'top',
+        x: markerCenterX - popupWidth / 2,
+        y: markerY - POPUP_GAP - popupHeight,
+        width: popupWidth,
+        height: popupHeight
+      },
+      {
+        side: 'left',
+        x: markerX - POPUP_GAP - popupWidth,
+        y: markerCenterY - popupHeight / 2,
+        width: popupWidth,
+        height: popupHeight
+      },
+      {
+        side: 'right',
+        x: markerX + markerRect.width + POPUP_GAP,
+        y: markerCenterY - popupHeight / 2,
+        width: popupWidth,
+        height: popupHeight
+      }
+    ];
+    var position = candidates.find(function (candidate) {
+      return isInsideBounds(candidate, mapWidth, mapHeight);
+    });
+
+    if (!position) {
+      position = candidates.reduce(function (best, candidate) {
+        return getVisibleArea(candidate, mapWidth, mapHeight) > getVisibleArea(best, mapWidth, mapHeight) ? candidate : best;
+      });
+      position = Object.assign({}, position, {
+        x: Math.max(SAFE_GAP, Math.min(position.x, Math.max(SAFE_GAP, mapWidth - SAFE_GAP - popupWidth))),
+        y: Math.max(SAFE_GAP, Math.min(position.y, Math.max(SAFE_GAP, mapHeight - SAFE_GAP - popupHeight)))
+      });
+    }
+
+    return {
+      side: position.side,
+      left: position.x - markerX,
+      top: position.y - markerY,
+      maxWidth: Math.max(0, mapWidth - SAFE_GAP * 2)
+    };
+  }
+
+  function initMap(root) {
+    if (root.dataset.studioMapReady === 'true') return Promise.resolve();
+
+    var mapId = getMapId(root);
+    var sourceItems = getSourceItems(getSourceLists(mapId));
+    var points = sourceItems.map(function (item) {
+      var card = item.matches('[data-studio-map="card"]') ? item : item.querySelector('[data-studio-map="card"]');
+      var coordinates = parseCoordinate(item.getAttribute('data-studio-map-coordinates'));
+
+      if (!coordinates || !card) {
+        console.warn('Карта студий: пропущен CMS-элемент без координат или плашки.', item);
+        return null;
+      }
+
+      return {
+        item: item,
+        card: card,
+        coordinates: coordinates
+      };
+    }).filter(Boolean);
+    var apiKey = String(root.getAttribute('data-yandex-api-key') || '').trim();
+
+    if (!points.length) {
+      console.warn('Карта студий: не найдены CMS-элементы с корректным data-studio-map-coordinates.');
+      return Promise.resolve();
+    }
+
+    if (!apiKey && !window.ymaps3) {
+      console.warn('Карта студий: задайте API-ключ в data-yandex-api-key у контейнера карты.');
+      return Promise.resolve();
+    }
+
+    root.dataset.studioMapReady = 'true';
+    var canvas = createCanvas(root);
+
+    return loadYandexApi(apiKey)
+      .then(function (ymaps3) {
+        return ymaps3.ready.then(function () {
+          var YMap = ymaps3.YMap;
+          var YMapDefaultSchemeLayer = ymaps3.YMapDefaultSchemeLayer;
+          var YMapDefaultFeaturesLayer = ymaps3.YMapDefaultFeaturesLayer;
+          var YMapMarker = ymaps3.YMapMarker;
+          var map = new YMap(canvas, {
+            location: getInitialLocation(root, points),
+            margin: [SAFE_GAP, SAFE_GAP, SAFE_GAP, SAFE_GAP],
+            behaviors: ['drag']
+          }, [
+            new YMapDefaultSchemeLayer({}),
+            new YMapDefaultFeaturesLayer({ zIndex: MARKERS_LAYER_Z_INDEX })
+          ]);
+          createDimmer(canvas);
+          var states = [];
+          var activeState = null;
+          var closeTimer = 0;
+
+          function placePopup(state) {
+            if (!state || state !== activeState || !state.popup.classList.contains('is-active')) return;
+
+            state.popup.style.maxWidth = Math.max(0, root.getBoundingClientRect().width - SAFE_GAP * 2) + 'px';
+            var position = getPopupPosition(root, state.button, state.popup);
+
+            state.popup.style.left = position.left + 'px';
+            state.popup.style.top = position.top + 'px';
+            state.popup.setAttribute('data-studio-map-popup-side', position.side);
+          }
+
+          function closePopup(state) {
+            if (!state || state !== activeState) return;
+
+            state.popup.classList.remove('is-active');
+            state.button.setAttribute('aria-expanded', 'false');
+            state.markerElement.classList.remove('is-active');
+            state.marker.update({ zIndex: 0 });
+            root.classList.remove('is-studio-map-popup-open');
+            activeState = null;
+          }
+
+          function openPopup(state) {
+            window.clearTimeout(closeTimer);
+
+            if (activeState && activeState !== state) closePopup(activeState);
+            if (activeState === state) {
+              requestAnimationFrame(function () {
+                placePopup(state);
+              });
+              return;
+            }
+
+            activeState = state;
+            state.popup.classList.add('is-active');
+            state.button.setAttribute('aria-expanded', 'true');
+            state.markerElement.classList.add('is-active');
+            state.marker.update({ zIndex: ACTIVE_MARKER_Z_INDEX });
+            root.classList.add('is-studio-map-popup-open');
+
+            requestAnimationFrame(function () {
+              placePopup(state);
+            });
+          }
+
+          function scheduleClose(state) {
+            window.clearTimeout(closeTimer);
+            closeTimer = window.setTimeout(function () {
+              closePopup(state);
+            }, 60);
+          }
+
+          points.forEach(function (point, index) {
+            var markerElement = document.createElement('div');
+            var button = document.createElement('button');
+            var iconWrap = document.createElement('span');
+            var defaultIcon = document.createElement('img');
+            var hoverIcon = document.createElement('img');
+            var popup = document.createElement('div');
+            var cardClone = cloneCard(point.card);
+            var state;
+
+            markerElement.setAttribute('data-studio-map-marker', '');
+            button.type = 'button';
+            button.setAttribute('data-studio-map-marker-button', '');
+            button.setAttribute('aria-expanded', 'false');
+            button.setAttribute('aria-label', 'Показать информацию о студии');
+            iconWrap.setAttribute('data-studio-map-marker-icon-wrap', '');
+            defaultIcon.setAttribute('data-studio-map-marker-icon', 'default');
+            defaultIcon.src = DEFAULT_ICON_URL;
+            defaultIcon.alt = '';
+            defaultIcon.decoding = 'async';
+            hoverIcon.setAttribute('data-studio-map-marker-icon', 'hover');
+            hoverIcon.src = HOVER_ICON_URL;
+            hoverIcon.alt = '';
+            hoverIcon.decoding = 'async';
+            popup.setAttribute('data-studio-map-popup', '');
+            popup.setAttribute('aria-live', 'polite');
+            popup.appendChild(cardClone);
+            iconWrap.appendChild(defaultIcon);
+            iconWrap.appendChild(hoverIcon);
+            button.appendChild(iconWrap);
+            markerElement.appendChild(button);
+            markerElement.appendChild(popup);
+
+            state = {
+              marker: new YMapMarker({
+                id: 'studio-map-marker-' + mapId + '-' + index,
+                coordinates: point.coordinates,
+                blockBehaviors: true,
+                zIndex: 0
+              }, markerElement),
+              markerElement: markerElement,
+              button: button,
+              popup: popup
+            };
+
+            map.addChild(state.marker);
+            states.push(state);
+
+            markerElement.addEventListener('pointerenter', function () {
+              openPopup(state);
+            });
+            markerElement.addEventListener('pointerleave', function (event) {
+              if (event.relatedTarget && markerElement.contains(event.relatedTarget)) return;
+              scheduleClose(state);
+            });
+            markerElement.addEventListener('focusin', function () {
+              openPopup(state);
+            });
+            markerElement.addEventListener('focusout', function (event) {
+              if (event.relatedTarget && markerElement.contains(event.relatedTarget)) return;
+              scheduleClose(state);
+            });
+            button.addEventListener('click', function (event) {
+              event.preventDefault();
+              if (activeState === state) {
+                closePopup(state);
+              } else {
+                openPopup(state);
+              }
+            });
+            defaultIcon.addEventListener('load', function () {
+              placePopup(state);
+            });
+            hoverIcon.addEventListener('load', function () {
+              placePopup(state);
+            });
+
+            if (window.ResizeObserver) {
+              new ResizeObserver(function () {
+                placePopup(state);
+              }).observe(popup);
+            }
+          });
+
+          root.addEventListener('pointerdown', function (event) {
+            if (activeState && !event.target.closest('[data-studio-map-marker]')) closePopup(activeState);
+          });
+          window.addEventListener('resize', function () {
+            placePopup(activeState);
+          });
+
+          if (window.ResizeObserver) {
+            new ResizeObserver(function () {
+              placePopup(activeState);
+            }).observe(root);
+          }
+        });
+      })
+      .catch(function (error) {
+        root.dataset.studioMapReady = 'error';
+        console.error('Карта студий:', error);
+      });
+  }
+
+  function initAll() {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-studio-map="root"]'), initMap);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAll);
+  } else {
+    initAll();
+  }
+})();
+</script>

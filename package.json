@@ -1,0 +1,11 @@
+{
+  "name": "chill-webflow-scripts",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "node tools/build-assets.txt"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
+}
