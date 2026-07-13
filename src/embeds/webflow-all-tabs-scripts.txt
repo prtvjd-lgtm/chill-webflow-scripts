@@ -108,7 +108,8 @@
     maxLengthScale: 1.2
   };
   const MOBILE_BRUSH_QUERY = '(max-width: 767px)';
-  const MOBILE_PADDING_SCALE = 0.5;
+  const MOBILE_PADDING_X_SCALE = 0.7;
+  const MOBILE_PADDING_Y_SCALE = 0.5;
   const MOBILE_STROKE_SCALE = 0.75;
   const MOBILE_STROKE_KEYS = [
     'mainWidth',
@@ -202,8 +203,8 @@
     }
 
     if (usesMobileBrushState()) {
-      runtime.paddingX *= MOBILE_PADDING_SCALE;
-      runtime.paddingY *= MOBILE_PADDING_SCALE;
+      runtime.paddingX *= MOBILE_PADDING_X_SCALE;
+      runtime.paddingY *= MOBILE_PADDING_Y_SCALE;
       runtime.minWidth = 0;
       runtime.minHeight = 0;
 
