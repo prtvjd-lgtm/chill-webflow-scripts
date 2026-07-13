@@ -65,7 +65,8 @@
       transition-timing-function: ease-out;
     }
 
-    [data-popup="true"].is-content-hidden [data-popup-card="true"] {
+    [data-popup="true"].is-content-hidden [data-popup-card="true"],
+    [data-popup="true"].is-content-hidden .close-button {
       display: none !important;
     }
   `,document.head.appendChild(a);function mt(Z){if(!Z||Z.__chillPopupTiltStarted)return;Z.__chillPopupTiltStarted=!0;const Y=2.6,k=.55,tt=.1;let d=0,st=0,F=0,K=0,at=null;Z.style.transformStyle="preserve-3d",Z.style.willChange="transform";function C(L){const x=Math.max(-1,Math.min(1,L));return Math.sign(x)*Math.pow(Math.abs(x),k)}function $(){F+=(d-F)*tt,K+=(st-K)*tt,Z.style.transform=`

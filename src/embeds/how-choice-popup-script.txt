@@ -69,7 +69,8 @@ document.addEventListener("DOMContentLoaded", function () {
       transition-timing-function: ease-out;
     }
 
-    [data-popup="true"].is-content-hidden [data-popup-card="true"] {
+    [data-popup="true"].is-content-hidden [data-popup-card="true"],
+    [data-popup="true"].is-content-hidden .close-button {
       display: none !important;
     }
   `;
