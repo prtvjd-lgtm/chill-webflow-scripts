@@ -374,7 +374,10 @@
         var previousSlide = slideList[previousIndex];
         var exitDuration = getSlideExitDuration(previousSlide);
 
-        sliderState.exitingMovers = sliderState.exitingMovers.concat(buildMovers(previousSlide, time, false, 'out', sliderState.layout));
+        var outgoingMovers = buildMovers(previousSlide, time, false, 'out', sliderState.layout);
+
+        preserveMoverPlacements(outgoingMovers, sliderState.movers);
+        sliderState.exitingMovers = sliderState.exitingMovers.concat(outgoingMovers);
         sliderState.exitingSlides.push({
           slide: previousSlide,
           hideAt: time + exitDuration
@@ -389,6 +392,24 @@
 
     function getVisualMovers(state) {
       return state.movers.concat(state.exitingMovers);
+    }
+
+    function preserveMoverPlacements(nextMovers, currentMovers) {
+      nextMovers.forEach(function (nextMover) {
+        var currentMover = currentMovers.find(function (current) {
+          return current.el === nextMover.el;
+        });
+
+        if (!currentMover || !currentMover.placement) return;
+
+        nextMover.placement = {
+          index: currentMover.placement.index,
+          width: currentMover.placement.width,
+          height: currentMover.placement.height,
+          viewportWidth: currentMover.placement.viewportWidth,
+          viewportHeight: currentMover.placement.viewportHeight
+        };
+      });
     }
 
     function startInitialSlide(state, slide, mask, time, reduceMotion) {
