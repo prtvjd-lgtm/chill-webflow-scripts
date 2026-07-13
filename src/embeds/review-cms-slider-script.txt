@@ -35,44 +35,9 @@
   pointer-events: none;
 }
 
-[data-cms-slider="root"] .arrow-left,
-[data-cms-slider="root"] .arrow-right {
-  display: block !important;
-  position: fixed !important;
-  left: 0 !important;
-  top: 0 !important;
-  z-index: 9999 !important;
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none !important;
-  transform: translate3d(var(--cms-slider-cursor-x, -100px), var(--cms-slider-cursor-y, -100px), 0) translate(-50%, -50%);
-  transition: opacity 120ms ease;
-}
-
-[data-cms-slider="root"].is-cms-slider-cursor-visible,
-[data-cms-slider="root"].is-cms-slider-cursor-visible * {
-  cursor: none !important;
-}
-
-[data-cms-slider="root"].is-cms-slider-cursor-visible .arrow-left.is-visible,
-[data-cms-slider="root"].is-cms-slider-cursor-visible .arrow-right.is-visible {
-  opacity: 1;
-  visibility: visible;
-}
-
 @media (max-width: 991px) {
   [data-cms-slider="viewport"] {
     touch-action: pan-y;
-  }
-
-  [data-cms-slider="root"] .arrow-left,
-  [data-cms-slider="root"] .arrow-right {
-    display: none !important;
-  }
-
-  [data-cms-slider="root"].is-cms-slider-cursor-visible,
-  [data-cms-slider="root"].is-cms-slider-cursor-visible * {
-    cursor: auto !important;
   }
 }
 </style>
@@ -84,8 +49,6 @@
 
   const ACTIVE_DOT_CLASS = 'is-active';
   const DISABLED_CLASS = 'is-disabled';
-  const CURSOR_VISIBLE_CLASS = 'is-cms-slider-cursor-visible';
-  const VISIBLE_CLASS = 'is-visible';
   const INTERACTIVE_SELECTOR = [
     'a',
     'button',
@@ -128,8 +91,6 @@
     const prevButton = root.querySelector(selector('prev'));
     const nextButton = root.querySelector(selector('next'));
     const pagination = root.querySelector(selector('pagination'));
-    const cursorLeft = root.querySelector('.arrow-left');
-    const cursorRight = root.querySelector('.arrow-right');
 
     if (!viewport || !track) return;
 
@@ -139,7 +100,6 @@
     let resizeTimer = 0;
     let preloadTimer = 0;
     let loadingPromise = null;
-    let lastPointerEvent = null;
     let swipeStartX = 0;
     let swipeStartY = 0;
     let swipeStartTime = 0;
@@ -245,14 +205,6 @@
       setDisabled(nextButton, isLoading || (!nextPageUrl && currentIndex >= getMaxIndex()));
     }
 
-    function canGoPrev() {
-      return !isLoading && currentIndex > 0;
-    }
-
-    function canGoNext() {
-      return !isLoading && (Boolean(nextPageUrl) || currentIndex < getMaxIndex());
-    }
-
     function updateDots() {
       if (paginationController) paginationController.update(currentIndex);
     }
@@ -263,60 +215,10 @@
       updatePosition();
       updateDots();
       updateButtons();
-      updateCustomCursor();
     }
 
     function isInteractiveTarget(target) {
       return Boolean(target && target.closest && target.closest(INTERACTIVE_SELECTOR));
-    }
-
-    function getPointerDirection(event) {
-      const rect = root.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-
-      return event.clientX < centerX ? -1 : 1;
-    }
-
-    function hideCustomCursor() {
-      root.classList.remove(CURSOR_VISIBLE_CLASS);
-
-      if (cursorLeft) cursorLeft.classList.remove(VISIBLE_CLASS);
-      if (cursorRight) cursorRight.classList.remove(VISIBLE_CLASS);
-    }
-
-    function updateCustomCursor(event) {
-      const pointerEvent = event || lastPointerEvent;
-
-      if (isSwipeMode()) {
-        hideCustomCursor();
-        return;
-      }
-
-      if (!pointerEvent || (!cursorLeft && !cursorRight) || !root.matches(':hover')) {
-        hideCustomCursor();
-        return;
-      }
-
-      if (isInteractiveTarget(pointerEvent.target)) {
-        hideCustomCursor();
-        return;
-      }
-
-      const direction = getPointerDirection(pointerEvent);
-      const showLeft = direction < 0;
-      const showRight = direction > 0;
-
-      if (!showLeft && !showRight) {
-        hideCustomCursor();
-        return;
-      }
-
-      root.style.setProperty('--cms-slider-cursor-x', pointerEvent.clientX + 'px');
-      root.style.setProperty('--cms-slider-cursor-y', pointerEvent.clientY + 'px');
-      root.classList.add(CURSOR_VISIBLE_CLASS);
-
-      if (cursorLeft) cursorLeft.classList.toggle(VISIBLE_CLASS, showLeft);
-      if (cursorRight) cursorRight.classList.toggle(VISIBLE_CLASS, showRight);
     }
 
     function preloadNextPage() {
@@ -483,29 +385,6 @@
         goTo(currentIndex + 1);
       });
     }
-
-    root.addEventListener('mousemove', function (event) {
-      lastPointerEvent = event;
-      updateCustomCursor(event);
-    });
-
-    root.addEventListener('mouseleave', function () {
-      lastPointerEvent = null;
-      hideCustomCursor();
-    });
-
-    root.addEventListener('click', function (event) {
-      if (isSwipeMode()) return;
-      if (isInteractiveTarget(event.target)) return;
-
-      const direction = getPointerDirection(event);
-
-      if (direction < 0) {
-        goTo(currentIndex - 1);
-      } else {
-        goTo(currentIndex + 1);
-      }
-    });
 
     viewport.addEventListener('touchstart', handleSwipeStart, {
       passive: true
