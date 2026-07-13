@@ -27,11 +27,22 @@
       transition: top 500ms cubic-bezier(0, 0.55, 0.45, 1);
     }
 
+    [data-popup="true"] .close-button {
+      position: relative;
+      z-index: 2;
+      top: 20px;
+      transition: top 500ms cubic-bezier(0, 0.55, 0.45, 1);
+    }
+
     [data-popup="true"].is-active [data-popup-bg="true"] {
       opacity: 1;
     }
 
     [data-popup="true"].is-active [data-popup-card="true"] {
+      top: 0;
+    }
+
+    [data-popup="true"].is-active .close-button {
       top: 0;
     }
 
@@ -43,6 +54,12 @@
     }
 
     [data-popup="true"].is-closing [data-popup-card="true"] {
+      top: 20px;
+      transition-duration: 200ms;
+      transition-timing-function: ease-out;
+    }
+
+    [data-popup="true"].is-closing .close-button {
       top: 20px;
       transition-duration: 200ms;
       transition-timing-function: ease-out;
