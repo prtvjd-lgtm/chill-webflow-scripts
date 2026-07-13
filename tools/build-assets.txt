@@ -94,7 +94,7 @@ const embeds = {
 };
 
 const bundles = {
-  global: [
+  site: [
     'cmsPagination',
     'header',
     'howChoicePopup',
@@ -106,27 +106,31 @@ const bundles = {
     'practiceTabs',
     'practiceCardVideo',
     'cmsFaq',
-    'practiceQueryNavigation'
-  ],
-  home: [
+    'practiceQueryNavigation',
     'contentTabs',
     'cmsLogoMarquee',
     'offerTabs',
     'pressureShape',
     'reviewCmsSlider',
-    'referralScroll'
-  ],
-  about: ['aboutScrollBrush'],
-  practice: ['practiceDurationTabs']
+    'referralScroll',
+    'aboutScrollBrush',
+    'practiceDurationTabs'
+  ]
 };
 
 const pages = {
-  '/': ['global', 'home'],
-  '/about': ['global', 'about'],
-  '/practice': ['global', 'practice']
+  '/': ['site'],
+  '/about': ['site'],
+  '/practice': ['site']
 };
 
 fs.mkdirSync(DIST_DIR, { recursive: true });
+
+fs.readdirSync(DIST_DIR).forEach(function (file) {
+  if (/\.(?:css|js)$/.test(file)) {
+    fs.unlinkSync(path.join(DIST_DIR, file));
+  }
+});
 
 Object.keys(bundles).forEach(function (bundleName) {
   const blocks = bundles[bundleName].map(function (embedName) {
@@ -153,19 +157,15 @@ const manifest = {
   pages: pages
 };
 
-const snippets = Object.keys(pages).map(function (page) {
-  const bundleNames = pages[page];
-  const cssTags = bundleNames.map(function (bundleName) {
-    return '<link rel="stylesheet" href="' + ASSET_BASE_URL + '/' + bundleName + '.css">';
-  });
-  const jsTags = bundleNames.map(function (bundleName) {
-    return '<script defer src="' + ASSET_BASE_URL + '/' + bundleName + '.js"></script>';
-  });
-
-  return '<!-- ' + page + ' -->\n' + cssTags.concat(jsTags).join('\n');
-});
+const snippets = [
+  '<!-- Site Settings → Head Code -->',
+  '<link rel="stylesheet" href="' + ASSET_BASE_URL + '/site.css">',
+  '',
+  '<!-- Site Settings → Footer Code -->',
+  '<script defer src="' + ASSET_BASE_URL + '/site.js"></script>'
+];
 
 writeFile('manifest.json', JSON.stringify(manifest, null, 2));
-writeFile('embed-snippets.html', snippets.join('\n\n'));
+writeFile('embed-snippets.html', snippets.join('\n'));
 
 console.log('Собрано бандлов: ' + Object.keys(bundles).join(', '));
