@@ -1062,13 +1062,9 @@
     }
 
     function getResponsiveConstraintPlacements(movers, points, baseDeformedPoints, rect, stageRect, globalMotion) {
-      var keepFixedMobileAnchorsInViewport = movers.some(function (mover) {
-        return mover.fixedMobileAnchor;
-      });
-
       if (
         window.innerWidth > CONFIG.constraintMaxViewportWidth ||
-        !shouldKeepItemsInViewport(stageRect, keepFixedMobileAnchorsInViewport)
+        !shouldKeepItemsInViewport(stageRect)
       ) {
         return null;
       }
@@ -1085,7 +1081,7 @@
         var desiredIndex = Number.isFinite(mover.flowIndex) ? mover.flowIndex : mover.anchorIndex;
 
         if (mover.fixedMobileAnchor) {
-          var fixedNaturalPlacement = getItemPlacement(
+          var fixedIndex = resolveFixedMobilePlacementIndex(
             mover,
             desiredIndex,
             points,
@@ -1093,27 +1089,21 @@
             rect,
             stageRect,
             globalMotion,
+            itemRect,
+            occupiedPlacements
+          );
+          var fixedNaturalPlacement = getItemPlacement(
+            mover,
+            fixedIndex,
+            points,
+            baseDeformedPoints,
+            rect,
+            stageRect,
+            globalMotion,
             itemRect
           );
-          var fixedPlacement = fitItemPlacementToViewport(
-            fixedNaturalPlacement,
-            itemRect,
-            stageRect
-          );
-          var fixedAdjustment = Math.hypot(
-            fixedPlacement.x - fixedNaturalPlacement.x,
-            fixedPlacement.y - fixedNaturalPlacement.y
-          );
-          var fixedCandidate = {
-            index: desiredIndex,
-            placement: fixedPlacement,
-            itemRect: itemRect,
-            mover: mover
-          };
 
-          occupiedPlacements.push(getItemPlacementBounds(fixedPlacement, itemRect, stageRect));
-          placements.push(fixedCandidate);
-          needsConstraint = needsConstraint || fixedAdjustment > 1;
+          occupiedPlacements.push(getItemPlacementBounds(fixedNaturalPlacement, itemRect, stageRect));
           return;
         }
 
@@ -1179,6 +1169,86 @@
       });
 
       return needsConstraint ? placements : null;
+    }
+
+    function resolveFixedMobilePlacementIndex(
+      mover,
+      desiredIndex,
+      points,
+      deformedPoints,
+      rect,
+      stageRect,
+      globalMotion,
+      itemRect,
+      occupiedPlacements
+    ) {
+      var cached = mover.placement;
+
+      if (
+        cached &&
+        Math.abs(cached.width - itemRect.width) <= 1 &&
+        Math.abs(cached.height - itemRect.height) <= 1 &&
+        Math.abs(cached.viewportWidth - window.innerWidth) <= 1 &&
+        Math.abs(cached.viewportHeight - window.innerHeight) <= 1
+      ) {
+        return cached.index;
+      }
+
+      var bestIndex = null;
+      var bestScore = Infinity;
+      var fallbackIndex = null;
+      var fallbackScore = Infinity;
+      var anchorIsTop = mover.anchorTargetY <= 0.5;
+
+      points.forEach(function (point, index) {
+        if (anchorIsTop ? point.y > 0.5 : point.y < 0.5) return;
+
+        var candidate = getItemPlacement(
+          mover,
+          index,
+          points,
+          deformedPoints,
+          rect,
+          stageRect,
+          globalMotion,
+          itemRect
+        );
+
+        if (!isItemPlacementInViewport(candidate, itemRect, stageRect)) return;
+
+        var distance = circularIndexDistance(index, desiredIndex, points.length);
+        var collisionArea = getItemPlacementCollisionArea(
+          candidate,
+          itemRect,
+          stageRect,
+          occupiedPlacements
+        );
+        var score = distance + collisionArea * 1000;
+
+        if (score < fallbackScore) {
+          fallbackIndex = index;
+          fallbackScore = score;
+        }
+
+        if (collisionArea === 0 && distance < bestScore) {
+          bestIndex = index;
+          bestScore = distance;
+        }
+      });
+
+      var index = bestIndex === null
+        ? (fallbackIndex === null ? desiredIndex : fallbackIndex)
+        : bestIndex;
+
+      mover.placement = {
+        index: index,
+        width: itemRect.width,
+        height: itemRect.height,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight
+      };
+
+      return index;
     }
 
     function fitItemPlacementToViewport(placement, itemRect, stageRect) {
@@ -1302,7 +1372,11 @@
     }
 
     function resolveItemPlacementIndex(mover, desiredIndex, points, deformedPoints, rect, stageRect, globalMotion, itemRect, occupiedPlacements) {
-      if (mover.fixedMobileAnchor) return desiredIndex;
+      if (mover.fixedMobileAnchor) {
+        var fixedCachedPlacement = mover.placement;
+
+        return fixedCachedPlacement ? fixedCachedPlacement.index : desiredIndex;
+      }
 
       if (!shouldKeepItemsInViewport(stageRect) || itemRect.width <= 0 || itemRect.height <= 0) {
         return desiredIndex;
@@ -1413,18 +1487,7 @@
       };
     }
 
-    function shouldKeepItemsInViewport(stageRect, keepWhileVisible) {
-      if (keepWhileVisible) {
-        var padding = CONFIG.itemViewportPadding;
-
-        return (
-          stageRect.right > padding &&
-          stageRect.left < window.innerWidth - padding &&
-          stageRect.bottom > padding &&
-          stageRect.top < window.innerHeight - padding
-        );
-      }
-
+    function shouldKeepItemsInViewport(stageRect) {
       return window.scrollY <= 1 && stageRect.top >= -1 && stageRect.left >= -1;
     }
 
