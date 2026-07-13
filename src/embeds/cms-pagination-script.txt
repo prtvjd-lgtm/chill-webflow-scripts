@@ -146,20 +146,17 @@
       }
 
       const previousTargets = currentDots.map(getTargetValue);
-      const direction = targetIndexes[0] - previousTargets[0];
+      const activeDirection = activeIndex - lastActiveIndex;
+      const targetShift = targetIndexes[0] - previousTargets[0];
+      const currentActiveDotIndex = previousTargets.indexOf(lastActiveIndex);
+      const nextActiveDotIndex = targetIndexes.indexOf(activeIndex);
       const parent = currentDots[0].parentElement;
 
       if (
         !parent ||
-        (direction !== 1 && direction !== -1) ||
-        activeIndex - lastActiveIndex !== direction ||
-        previousTargets[1] !== lastActiveIndex ||
-        targetIndexes[1] !== activeIndex ||
+        (activeDirection !== 1 && activeDirection !== -1) ||
         !previousTargets.every(Number.isFinite) ||
         !targetIndexes.every(Number.isFinite) ||
-        !previousTargets.every(function (targetIndex, dotIndex) {
-          return targetIndexes[dotIndex] - targetIndex === direction;
-        }) ||
         !currentDots.every(function (dot) {
           return dot.parentElement === parent;
         })
@@ -167,7 +164,21 @@
         return 0;
       }
 
-      return direction;
+      const isWindowShift =
+        targetShift === activeDirection &&
+        currentActiveDotIndex === 1 &&
+        nextActiveDotIndex === 1 &&
+        previousTargets.every(function (targetIndex, dotIndex) {
+          return targetIndexes[dotIndex] - targetIndex === activeDirection;
+        });
+      const isBoundaryShift =
+        targetShift === 0 &&
+        nextActiveDotIndex - currentActiveDotIndex === activeDirection &&
+        previousTargets.every(function (targetIndex, dotIndex) {
+          return targetIndexes[dotIndex] === targetIndex;
+        });
+
+      return isWindowShift || isBoundaryShift ? activeDirection : 0;
     }
 
     function applyState(currentDots, targetIndexes, activeIndex) {
