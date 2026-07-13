@@ -446,6 +446,10 @@
             }, 60);
           }
 
+          function isClickMode() {
+            return window.matchMedia('(max-width: 991px)').matches;
+          }
+
           points.forEach(function (point, index) {
             var markerElement = document.createElement('div');
             var button = document.createElement('button');
@@ -495,16 +499,20 @@
             states.push(state);
 
             markerElement.addEventListener('pointerenter', function () {
+              if (isClickMode()) return;
               openPopup(state);
             });
             markerElement.addEventListener('pointerleave', function (event) {
+              if (isClickMode()) return;
               if (event.relatedTarget && markerElement.contains(event.relatedTarget)) return;
               scheduleClose(state);
             });
             markerElement.addEventListener('focusin', function () {
+              if (isClickMode()) return;
               openPopup(state);
             });
             markerElement.addEventListener('focusout', function (event) {
+              if (isClickMode()) return;
               if (event.relatedTarget && markerElement.contains(event.relatedTarget)) return;
               scheduleClose(state);
             });
