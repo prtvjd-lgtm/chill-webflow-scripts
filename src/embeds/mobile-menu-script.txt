@@ -1,6 +1,7 @@
 <!-- Мобильное меню -->
 <style>
   @media (max-width: 990px) {
+    [data-mobile-menu]:not(.is-mobile-menu-ready),
     [data-mobile-menu].is-mobile-menu-closed {
       display: none !important;
     }
@@ -20,6 +21,7 @@
   };
 
   const CLOSED_CLASS = 'is-mobile-menu-closed';
+  const READY_CLASS = 'is-mobile-menu-ready';
   const ANIMATION = {
     duration: 600,
     stagger: 70,
@@ -245,5 +247,9 @@
   }
 
   syncViewport();
+
+  states.forEach(function (state) {
+    state.menu.classList.add(READY_CLASS);
+  });
 })();
 </script>
