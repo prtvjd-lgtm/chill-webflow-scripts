@@ -3,13 +3,264 @@
 (function () {
   if (window.ChillCmsPagination) return;
 
+  const DOT_MOTION_DURATION = 450;
+  const DOT_MOTION_EASING = 'cubic-bezier(0.215, 0.61, 0.355, 1)';
+
   function create(options) {
     const activeClass = options.activeClass || 'is-active';
     const targetAttribute = options.targetAttribute || 'data-chill-pagination-target';
     let dots = [];
+    let lastActiveIndex = null;
+    let motionId = 0;
+    let animations = [];
+    let ghosts = [];
 
     function getDots() {
       return Array.from(options.getDots ? options.getDots() : []);
+    }
+
+    function getTargetValue(dot) {
+      const value = dot.getAttribute(targetAttribute);
+      const targetIndex = value === null ? NaN : Number(value);
+
+      return Number.isFinite(targetIndex) ? targetIndex : NaN;
+    }
+
+    function getTargetIndexes(activeIndex, dotCount) {
+      return Array.from({
+        length: dotCount
+      }, function (_, dotIndex) {
+        return Number(options.getTargetIndex(dotIndex, activeIndex, dotCount));
+      });
+    }
+
+    function prefersReducedMotion() {
+      return Boolean(
+        window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      );
+    }
+
+    function clearMotion() {
+      motionId += 1;
+
+      animations.forEach(function (animation) {
+        animation.cancel();
+      });
+      animations = [];
+
+      ghosts.forEach(function (ghost) {
+        ghost.remove();
+      });
+      ghosts = [];
+    }
+
+    function getVisualState(dot) {
+      const styles = window.getComputedStyle(dot);
+
+      return {
+        rect: dot.getBoundingClientRect(),
+        background: styles.background,
+        backgroundColor: styles.backgroundColor,
+        border: styles.border,
+        borderRadius: styles.borderRadius,
+        boxShadow: styles.boxShadow,
+        boxSizing: styles.boxSizing,
+        color: styles.color,
+        display: styles.display,
+        filter: styles.filter,
+        opacity: styles.opacity,
+        transform: styles.transform,
+        transformOrigin: styles.transformOrigin
+      };
+    }
+
+    function getTransform(baseTransform, x, y, scale) {
+      const base = baseTransform && baseTransform !== 'none' ? baseTransform + ' ' : '';
+
+      return 'translate3d(' + x + 'px, ' + y + 'px, 0) ' + base + 'scale(' + scale + ')';
+    }
+
+    function getMotionFrame(state, x, y, scale) {
+      return {
+        backgroundColor: state.backgroundColor,
+        opacity: state.opacity,
+        transform: getTransform(state.transform, x, y, scale),
+        transformOrigin: state.transformOrigin
+      };
+    }
+
+    function createOutgoingGhost(dot, state) {
+      if (!document.body) return null;
+
+      const ghost = dot.cloneNode(true);
+      const rect = state.rect;
+
+      ghost.removeAttribute('id');
+      ghost.querySelectorAll('[id]').forEach(function (element) {
+        element.removeAttribute('id');
+      });
+      ghost.setAttribute('aria-hidden', 'true');
+      ghost.setAttribute('tabindex', '-1');
+      ghost.style.position = 'fixed';
+      ghost.style.left = rect.left + 'px';
+      ghost.style.top = rect.top + 'px';
+      ghost.style.width = rect.width + 'px';
+      ghost.style.height = rect.height + 'px';
+      ghost.style.margin = '0';
+      ghost.style.display = state.display === 'inline' ? 'block' : state.display;
+      ghost.style.boxSizing = state.boxSizing;
+      ghost.style.background = state.background;
+      ghost.style.backgroundColor = state.backgroundColor;
+      ghost.style.border = state.border;
+      ghost.style.borderRadius = state.borderRadius;
+      ghost.style.boxShadow = state.boxShadow;
+      ghost.style.color = state.color;
+      ghost.style.filter = state.filter;
+      ghost.style.opacity = state.opacity;
+      ghost.style.pointerEvents = 'none';
+      ghost.style.transform = 'scale(1)';
+      ghost.style.transformOrigin = state.transformOrigin;
+      ghost.style.willChange = 'transform';
+      ghost.style.zIndex = '2147483647';
+      document.body.appendChild(ghost);
+
+      return ghost;
+    }
+
+    function hasMotionSupport(currentDots) {
+      return !prefersReducedMotion() && currentDots.every(function (dot) {
+        const rect = dot.getBoundingClientRect();
+
+        return typeof dot.animate === 'function' && rect.width > 0 && rect.height > 0;
+      });
+    }
+
+    function getShiftDirection(currentDots, targetIndexes, activeIndex) {
+      if (
+        currentDots.length !== 3 ||
+        lastActiveIndex === null ||
+        !hasMotionSupport(currentDots)
+      ) {
+        return 0;
+      }
+
+      const previousTargets = currentDots.map(getTargetValue);
+      const direction = targetIndexes[0] - previousTargets[0];
+      const parent = currentDots[0].parentElement;
+
+      if (
+        !parent ||
+        (direction !== 1 && direction !== -1) ||
+        activeIndex - lastActiveIndex !== direction ||
+        previousTargets[1] !== lastActiveIndex ||
+        targetIndexes[1] !== activeIndex ||
+        !previousTargets.every(Number.isFinite) ||
+        !targetIndexes.every(Number.isFinite) ||
+        !previousTargets.every(function (targetIndex, dotIndex) {
+          return targetIndexes[dotIndex] - targetIndex === direction;
+        }) ||
+        !currentDots.every(function (dot) {
+          return dot.parentElement === parent;
+        })
+      ) {
+        return 0;
+      }
+
+      return direction;
+    }
+
+    function applyState(currentDots, targetIndexes, activeIndex) {
+      currentDots.forEach(function (dot, dotIndex) {
+        const targetIndex = targetIndexes[dotIndex];
+        const isActive = Number.isFinite(targetIndex) && targetIndex === activeIndex;
+
+        dot.setAttribute(targetAttribute, Number.isFinite(targetIndex) ? String(targetIndex) : '0');
+        dot.classList.toggle(activeClass, isActive);
+        dot.setAttribute('aria-current', isActive ? 'true' : 'false');
+      });
+    }
+
+    function animateWindowShift(currentDots, targetIndexes, activeIndex, direction) {
+      const startStates = new Map(currentDots.map(function (dot) {
+        return [dot, getVisualState(dot)];
+      }));
+      const recycledDot = direction > 0 ? currentDots[0] : currentDots[currentDots.length - 1];
+      const ghost = createOutgoingGhost(recycledDot, startStates.get(recycledDot));
+      const parent = recycledDot.parentElement;
+
+      if (direction > 0) {
+        parent.appendChild(recycledDot);
+      } else {
+        parent.insertBefore(recycledDot, currentDots[0]);
+      }
+
+      const nextDots = refresh();
+      applyState(nextDots, targetIndexes, activeIndex);
+
+      const endStates = new Map(nextDots.map(function (dot) {
+        return [dot, getVisualState(dot)];
+      }));
+      const nextMotionId = motionId;
+      const nextAnimations = nextDots.map(function (dot) {
+        const startState = startStates.get(dot);
+        const endState = endStates.get(dot);
+        const startX = startState.rect.left - endState.rect.left;
+        const startY = startState.rect.top - endState.rect.top;
+        const keyframes = dot === recycledDot
+          ? [
+            getMotionFrame(endState, 0, 0, 0),
+            getMotionFrame(endState, 0, 0, 1)
+          ]
+          : [
+            getMotionFrame(startState, startX, startY, 1),
+            getMotionFrame(endState, 0, 0, 1)
+          ];
+
+        return dot.animate(keyframes, {
+          duration: DOT_MOTION_DURATION,
+          easing: DOT_MOTION_EASING,
+          fill: 'both'
+        });
+      });
+
+      if (ghost) {
+        nextAnimations.push(ghost.animate([
+          {
+            transform: 'scale(1)',
+            opacity: startStates.get(recycledDot).opacity
+          },
+          {
+            transform: 'scale(0)',
+            opacity: startStates.get(recycledDot).opacity
+          }
+        ], {
+          duration: DOT_MOTION_DURATION,
+          easing: DOT_MOTION_EASING,
+          fill: 'both'
+        }));
+        ghosts.push(ghost);
+      }
+
+      animations = nextAnimations;
+      let remainingAnimations = animations.length;
+
+      animations.forEach(function (animation) {
+        animation.onfinish = function () {
+          remainingAnimations -= 1;
+
+          if (remainingAnimations || nextMotionId !== motionId) return;
+
+          animations.forEach(function (completedAnimation) {
+            completedAnimation.cancel();
+          });
+          animations = [];
+          ghosts.forEach(function (completedGhost) {
+            completedGhost.remove();
+          });
+          ghosts = [];
+        };
+      });
     }
 
     function bindDot(dot) {
@@ -42,16 +293,19 @@
     }
 
     function update(activeIndex) {
+      clearMotion();
+
       const currentDots = refresh();
+      const targetIndexes = getTargetIndexes(activeIndex, currentDots.length);
+      const direction = getShiftDirection(currentDots, targetIndexes, activeIndex);
 
-      currentDots.forEach(function (dot, dotIndex) {
-        const targetIndex = Number(options.getTargetIndex(dotIndex, activeIndex, currentDots.length));
-        const isActive = Number.isFinite(targetIndex) && targetIndex === activeIndex;
+      if (direction) {
+        animateWindowShift(currentDots, targetIndexes, activeIndex, direction);
+      } else {
+        applyState(currentDots, targetIndexes, activeIndex);
+      }
 
-        dot.setAttribute(targetAttribute, Number.isFinite(targetIndex) ? String(targetIndex) : '0');
-        dot.classList.toggle(activeClass, isActive);
-        dot.setAttribute('aria-current', isActive ? 'true' : 'false');
-      });
+      lastActiveIndex = activeIndex;
     }
 
     return {
