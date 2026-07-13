@@ -856,6 +856,7 @@
   const PRACTICE_TAG_SELECTOR = '[data-practice-card-tag]';
   const HOVER_CARD_SELECTOR = '.practice-hover-card';
   const HOVER_POSITION_SELECTOR = '[data-practice-hover-position="bounded"]';
+  const PRACTICE_PAGE_HOVER_CLASS = 'practice-page';
   const PRACTICE_BLOCK_SELECTOR = '.practice-block';
   const PRACTICE_LIST_SELECTOR = '.practice-list';
   const BRUSH_LABEL_SELECTOR = '.text-caps';
@@ -904,6 +905,14 @@
     return window.innerWidth >= HOVER_CARD_MIN_VIEWPORT_WIDTH;
   }
 
+  function isPracticePageHoverCard(card) {
+    return card.classList.contains(PRACTICE_PAGE_HOVER_CLASS);
+  }
+
+  function shouldKeepHoverCardVisible(card) {
+    return isPracticePageHoverCard(card) && !canShowHoverCards();
+  }
+
   function getPracticeTags(practice) {
     return Array.from(practice.querySelectorAll(PRACTICE_TAG_SELECTOR))
       .map(function (tag) {
@@ -916,10 +925,32 @@
     return card.matches(HOVER_POSITION_SELECTOR);
   }
 
-  function prepareHoverCard(card) {
+  function resetHoverCardInlineStyles(card) {
+    card.style.display = '';
+    card.style.visibility = '';
+    card.style.transition = '';
+    card.style.transform = '';
+    card.style.pointerEvents = '';
+    card.style.position = '';
+    card.style.left = '';
+    card.style.top = '';
+    card.style.bottom = '';
+  }
+
+  function hideHoverCard(card) {
     card.style.display = 'none';
     card.style.visibility = '';
+    card.style.transition = 'none';
     card.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
+  }
+
+  function prepareHoverCard(card) {
+    if (shouldKeepHoverCardVisible(card)) {
+      resetHoverCardInlineStyles(card);
+      return;
+    }
+
+    hideHoverCard(card);
     card.style.transition =
       'transform ' + HOVER_ANIMATION.showDuration + 'ms ' + HOVER_ANIMATION.showEasing;
     card.style.pointerEvents = 'none';
@@ -1059,10 +1090,11 @@
     stopObservingHoverCard();
 
     hoverCards.forEach(function (card) {
-      card.style.display = 'none';
-      card.style.visibility = '';
-      card.style.transition = 'none';
-      card.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
+      if (shouldKeepHoverCardVisible(card)) {
+        resetHoverCardInlineStyles(card);
+      } else {
+        hideHoverCard(card);
+      }
     });
   }
 
@@ -1366,6 +1398,12 @@
       resizeTimer = window.setTimeout(function () {
         if (!canShowHoverCards()) {
           hideAllHoverCards();
+        } else {
+          hoverCards.forEach(function (card) {
+            if (isPracticePageHoverCard(card)) {
+              prepareHoverCard(card);
+            }
+          });
         }
 
         refreshActiveBrush();
