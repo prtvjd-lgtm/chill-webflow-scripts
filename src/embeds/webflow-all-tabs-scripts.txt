@@ -107,6 +107,18 @@
     minLengthScale: 0.18,
     maxLengthScale: 1.2
   };
+  const MOBILE_BRUSH_QUERY = '(max-width: 767px)';
+  const MOBILE_PADDING_SCALE = 0.5;
+  const MOBILE_STROKE_SCALE = 0.75;
+  const MOBILE_STROKE_KEYS = [
+    'mainWidth',
+    'secondWidth',
+    'dryWidth',
+    'scratchWidth',
+    'bristleWidth',
+    'maskWidth',
+    'cutWidth'
+  ];
 
   let brushState = state;
 
@@ -142,47 +154,63 @@
     };
   }
 
+  function usesMobileBrushState() {
+    return window.matchMedia && window.matchMedia(MOBILE_BRUSH_QUERY).matches;
+  }
+
   function getScaledBrushState(labelWidth, labelHeight) {
-    if (!SCALE_STATE.enabled) return state;
-
-    const sizeScale = clamp(
-      labelHeight / SCALE_STATE.referenceLabelHeight,
-      SCALE_STATE.minSizeScale,
-      SCALE_STATE.maxSizeScale
-    );
-    const lengthScale = clamp(
-      labelWidth / SCALE_STATE.referenceLabelWidth,
-      SCALE_STATE.minLengthScale,
-      SCALE_STATE.maxLengthScale
-    );
     const runtime = Object.assign({}, state);
-    const sizeKeys = [
-      'jitter',
-      'wave1Amp',
-      'wave2Amp',
-      'wave3Amp',
-      'variantOffset',
-      'mainWidth',
-      'secondWidth',
-      'dryWidth',
-      'scratchWidth',
-      'dashOffsetSpread',
-      'bristleLength',
-      'bristleSpread',
-      'bristleWidth',
-      'maskWidth',
-      'cutLength',
-      'cutWidth',
-      'cutSpread',
-      'filterScale'
-    ];
 
-    sizeKeys.forEach(function (key) {
-      runtime[key] = state[key] * sizeScale;
-    });
+    if (SCALE_STATE.enabled) {
+      const sizeScale = clamp(
+        labelHeight / SCALE_STATE.referenceLabelHeight,
+        SCALE_STATE.minSizeScale,
+        SCALE_STATE.maxSizeScale
+      );
+      const lengthScale = clamp(
+        labelWidth / SCALE_STATE.referenceLabelWidth,
+        SCALE_STATE.minLengthScale,
+        SCALE_STATE.maxLengthScale
+      );
+      const sizeKeys = [
+        'jitter',
+        'wave1Amp',
+        'wave2Amp',
+        'wave3Amp',
+        'variantOffset',
+        'mainWidth',
+        'secondWidth',
+        'dryWidth',
+        'scratchWidth',
+        'dashOffsetSpread',
+        'bristleLength',
+        'bristleSpread',
+        'bristleWidth',
+        'maskWidth',
+        'cutLength',
+        'cutWidth',
+        'cutSpread',
+        'filterScale'
+      ];
 
-    runtime.bristleCount = Math.max(0, Math.round(state.bristleCount * lengthScale));
-    runtime.cutCount = Math.max(0, Math.round(state.cutCount * lengthScale));
+      sizeKeys.forEach(function (key) {
+        runtime[key] = state[key] * sizeScale;
+      });
+
+      runtime.bristleCount = Math.max(0, Math.round(state.bristleCount * lengthScale));
+      runtime.cutCount = Math.max(0, Math.round(state.cutCount * lengthScale));
+    }
+
+    if (usesMobileBrushState()) {
+      runtime.paddingX *= MOBILE_PADDING_SCALE;
+      runtime.paddingY *= MOBILE_PADDING_SCALE;
+      runtime.minWidth = 0;
+      runtime.minHeight = 0;
+
+      MOBILE_STROKE_KEYS.forEach(function (key) {
+        runtime[key] *= MOBILE_STROKE_SCALE;
+      });
+    }
 
     return runtime;
   }
