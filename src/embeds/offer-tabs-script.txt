@@ -40,8 +40,11 @@
     inactive: '-1'
   };
   const CARD_HOVER = {
-    envelopeDownRatio: 0.55,
+    envelopeDownRatio: 0.393,
     cardLiftRatio: 0.55,
+    mobileBreakpoint: 991,
+    mobileEnvelopeDownMultiplier: 0.85,
+    mobileCardLiftMultiplier: 0.5,
     minimumTabGap: 48,
     duration: 1000,
     easing: 'cubic-bezier(0.075, 0.82, 0.165, 1)',
@@ -70,6 +73,10 @@
 
   function reduceMotion() {
     return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  function isMobileOfferCardMode() {
+    return window.innerWidth <= CARD_HOVER.mobileBreakpoint;
   }
 
   function setVisibility(element, isVisible) {
@@ -404,7 +411,7 @@
     }
 
     function updateTilt(event) {
-      if (!hover.isHovered || reduceMotion()) return;
+      if (!hover.isHovered || reduceMotion() || isMobileOfferCardMode()) return;
 
       const rect = card.getBoundingClientRect();
       const centerX = rect.width / 2;
@@ -431,8 +438,11 @@
     function calculateHoverOffsets() {
       const cardRect = card.getBoundingClientRect();
       const cardHeight = cardRect.height || card.offsetHeight || 0;
-      const envelopeDownY = cardHeight * CARD_HOVER.envelopeDownRatio;
-      const desiredCardLiftY = cardHeight * CARD_HOVER.cardLiftRatio;
+      const isMobile = isMobileOfferCardMode();
+      const envelopeDownY = cardHeight * CARD_HOVER.envelopeDownRatio *
+        (isMobile ? CARD_HOVER.mobileEnvelopeDownMultiplier : 1);
+      const desiredCardLiftY = cardHeight * CARD_HOVER.cardLiftRatio *
+        (isMobile ? CARD_HOVER.mobileCardLiftMultiplier : 1);
       const tabsBottom = getTabsBottom();
       const restingCardTop = cardRect.top - getCurrentCardOffsetY(card);
       const maximumCardLiftY = Number.isFinite(tabsBottom)
@@ -468,8 +478,8 @@
         event.clientY >= bounds.top && event.clientY <= bounds.bottom;
     }
 
-    hover.activate = function (event) {
-      if (hover.isHovered || !isCardActive()) return;
+    hover.activate = function (event, isClick) {
+      if (hover.isHovered || !isCardActive() || (isMobileOfferCardMode() && !isClick)) return;
 
       if (hideInactiveCards) {
         hideInactiveCards(card);
@@ -488,7 +498,7 @@
       setEnvelopeStageOffset(stage, hover.offsets.envelopeDownY, true);
       setCardStageOffset(canvas, hover.offsets.canvasOffsetY, true);
 
-      if (reduceMotion()) {
+      if (reduceMotion() || isClick) {
         return;
       }
 
@@ -522,6 +532,17 @@
       startTiltRender();
     };
 
+    hover.toggle = function (event) {
+      if (!isMobileOfferCardMode()) return;
+
+      if (hover.isHovered || hover.isEnabled) {
+        hover.deactivate(true);
+        return;
+      }
+
+      hover.activate(event, true);
+    };
+
     card.addEventListener('mouseenter', hover.activate);
     card.addEventListener('mousemove', updateTilt);
 
@@ -532,7 +553,7 @@
     });
 
     document.addEventListener('mousemove', function (event) {
-      if (!hover.isHovered) return;
+      if (!hover.isHovered || isMobileOfferCardMode()) return;
 
       if (!isCardActive()) {
         hover.deactivate(false);
@@ -870,8 +891,22 @@
         }
       }
 
+      function toggleCardFromStage(event) {
+        if (!isMobileOfferCardMode() || !activeCard) return;
+
+        const hover = cardHovers.get(activeCard);
+        const rect = activeCard.getBoundingClientRect();
+        const isPointerOverCard = event.clientX >= rect.left && event.clientX <= rect.right &&
+          event.clientY >= rect.top && event.clientY <= rect.bottom;
+
+        if (hover && isPointerOverCard) {
+          hover.toggle(event);
+        }
+      }
+
       cardStage.addEventListener('mouseenter', activateCardHoverFromStage);
       cardStage.addEventListener('mousemove', activateCardHoverFromStage);
+      cardStage.addEventListener('click', toggleCardFromStage);
     }
 
     function clearCardHovers() {
