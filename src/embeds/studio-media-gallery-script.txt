@@ -83,6 +83,8 @@
   const VIDEO_READY_CLASS = 'is-video-ready';
   const HAS_VIDEO_CLASS = 'has-video';
   const VIDEO_ERROR_CLASS = 'is-video-error';
+  const MOBILE_BREAKPOINT = 991;
+  const SWIPE_DISTANCE = 40;
   const DOT_SELECTOR = '[data-cms-slider="dot"]';
   const PAGINATION_SELECTOR = '[data-cms-slider="dots"]';
   const INTERACTIVE_SELECTOR = [
@@ -193,6 +195,7 @@
     let activeState = null;
     let rootIsVisible = true;
     let paginationController = null;
+    let touchStart = null;
 
     if (!studioStates.length) return;
 
@@ -291,10 +294,17 @@
       syncPlayback();
     }
 
-    function updateNavigationCursor(event) {
-      const isGalleryTarget = Boolean(event.target && event.target.closest && event.target.closest(selector('gallery')));
+    function isGalleryTarget(target) {
+      return Boolean(target && target.closest && target.closest(selector('gallery')));
+    }
 
-      if (!isGalleryTarget || isStudioCardTarget(event.target) || event.target.closest(INTERACTIVE_SELECTOR)) {
+    function updateNavigationCursor(event) {
+      if (window.innerWidth <= MOBILE_BREAKPOINT) {
+        root.style.removeProperty('cursor');
+        return;
+      }
+
+      if (!isGalleryTarget(event.target) || isStudioCardTarget(event.target) || event.target.closest(INTERACTIVE_SELECTOR)) {
         root.style.removeProperty('cursor');
         return;
       }
@@ -317,13 +327,52 @@
     });
 
     root.addEventListener('click', function (event) {
+      if (window.innerWidth <= MOBILE_BREAKPOINT) return;
       if (!activeState || activeState.slides.length < 2) return;
-      if (isStudioCardTarget(event.target) || event.target.closest(INTERACTIVE_SELECTOR)) return;
+      if (!isGalleryTarget(event.target) || isStudioCardTarget(event.target) || event.target.closest(INTERACTIVE_SELECTOR)) return;
 
       const rect = root.getBoundingClientRect();
       const direction = event.clientX < rect.left + rect.width / 2 ? -1 : 1;
 
       goToSlide(activeState.index + direction);
+    });
+
+    root.addEventListener('touchstart', function (event) {
+      if (window.innerWidth > MOBILE_BREAKPOINT || event.touches.length !== 1) return;
+      if (!activeState || activeState.slides.length < 2) return;
+      if (!isGalleryTarget(event.target) || isStudioCardTarget(event.target) || event.target.closest(INTERACTIVE_SELECTOR)) return;
+
+      const touch = event.touches[0];
+      touchStart = {
+        x: touch.clientX,
+        y: touch.clientY
+      };
+    }, {
+      passive: true
+    });
+
+    root.addEventListener('touchend', function (event) {
+      if (!touchStart || window.innerWidth > MOBILE_BREAKPOINT || !event.changedTouches.length) {
+        touchStart = null;
+        return;
+      }
+
+      const touch = event.changedTouches[0];
+      const deltaX = touch.clientX - touchStart.x;
+      const deltaY = touch.clientY - touchStart.y;
+      touchStart = null;
+
+      if (Math.abs(deltaX) < SWIPE_DISTANCE || Math.abs(deltaX) <= Math.abs(deltaY)) return;
+
+      goToSlide(activeState.index + (deltaX < 0 ? 1 : -1));
+    }, {
+      passive: true
+    });
+
+    root.addEventListener('touchcancel', function () {
+      touchStart = null;
+    }, {
+      passive: true
     });
 
     document.addEventListener('visibilitychange', syncPlayback);
