@@ -24,10 +24,15 @@
 
 <script>
   (() => {
-    const canvas = document.getElementById('site-noise');
+    let canvas = document.getElementById('site-noise');
+
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvas.id = 'site-noise';
+      canvas.setAttribute('aria-hidden', 'true');
+    }
 
     if (
-      !canvas ||
       !canvas.getContext ||
       window.matchMedia('(prefers-reduced-motion: reduce)').matches
     ) {
