@@ -268,7 +268,9 @@
 
   function clearRealCardTimer(card) {
     window.clearTimeout(card.__offerTabsRealCardTimer);
+    window.cancelAnimationFrame(card.__offerTabsRealCardFrame);
     card.__offerTabsRealCardTimer = null;
+    card.__offerTabsRealCardFrame = null;
   }
 
   function rememberRealCardStyles(card) {
@@ -288,6 +290,7 @@
 
     clearRealCardTimer(card);
     card.__offerTabsRealCardIsActive = false;
+    card.__offerTabsRealCardTransitionId = null;
 
     if (!styles) return;
 
@@ -467,7 +470,6 @@
       setHoverBounds();
       rememberCardStageStyles(canvas);
       rememberPresentation();
-      canvas.style.overflow = 'visible';
       card.style.transformStyle = 'preserve-3d';
       card.style.willChange = 'transform';
       card.style.transition = 'box-shadow ' + CARD_HOVER.duration + 'ms ' + CARD_HOVER.easing;
@@ -537,7 +539,7 @@
     return hover;
   }
 
-  function showRealCard(card, animate) {
+  function showRealCard(card, animate, transitionId) {
     if (!card) return;
 
     clearRealCardTimer(card);
@@ -554,25 +556,29 @@
     }
 
     card.__offerTabsRealCardIsActive = true;
+    card.__offerTabsRealCardTransitionId = transitionId;
     setVisibility(card, true);
     rememberRealCardStyles(card);
     card.style.transition = 'none';
     card.style.transform = getCardTransform(card, CARD_SWAP.dropY);
     card.getBoundingClientRect();
 
-    window.requestAnimationFrame(function () {
-      if (!card.__offerTabsRealCardIsActive) return;
+    card.__offerTabsRealCardFrame = window.requestAnimationFrame(function () {
+      card.__offerTabsRealCardFrame = null;
+
+      if (!card.__offerTabsRealCardIsActive || card.__offerTabsRealCardTransitionId !== transitionId) return;
 
       card.style.transition = 'transform ' + CARD_SWAP.duration + 'ms ' + CARD_SWAP.easing;
       card.style.transform = getCardTransform(card, CARD_SWAP.tabRaiseY);
     });
   }
 
-  function hideRealCard(card, animate) {
+  function hideRealCard(card, animate, transitionId) {
     if (!card) return;
 
     clearRealCardTimer(card);
     card.__offerTabsRealCardIsActive = false;
+    card.__offerTabsRealCardTransitionId = transitionId;
 
     if (!animate || reduceMotion()) {
       resetRealCard(card);
@@ -585,7 +591,7 @@
     card.style.transition = 'transform ' + CARD_SWAP.duration + 'ms ' + CARD_SWAP.easing;
     card.style.transform = getCardTransform(card, CARD_SWAP.dropY);
     card.__offerTabsRealCardTimer = window.setTimeout(function () {
-      if (card.__offerTabsRealCardIsActive) return;
+      if (card.__offerTabsRealCardIsActive || card.__offerTabsRealCardTransitionId !== transitionId) return;
 
       card.style.transform = styles.transform;
       card.style.transition = styles.transition;
@@ -812,6 +818,7 @@
 
     let activePanel = null;
     let activeCard = null;
+    let cardTransitionId = 0;
     const cardHovers = new Map();
 
     if (cardStage && cardCanvas) {
@@ -854,6 +861,7 @@
 
     function updateActiveCard(nextCard, animate) {
       const previousCard = activeCard;
+      const transitionId = ++cardTransitionId;
 
       clearCardHovers();
 
@@ -863,7 +871,7 @@
 
       if (!nextCard) {
         if (previousCard) {
-          hideRealCard(previousCard, animate);
+          hideRealCard(previousCard, animate, transitionId);
         }
 
         activeCard = null;
@@ -888,10 +896,10 @@
         });
       } else if (previousCard !== nextCard) {
         if (previousCard) {
-          hideRealCard(previousCard, true);
+          hideRealCard(previousCard, true, transitionId);
         }
 
-        showRealCard(nextCard, true);
+        showRealCard(nextCard, true, transitionId);
       } else {
         setVisibility(nextCard, true);
       }
