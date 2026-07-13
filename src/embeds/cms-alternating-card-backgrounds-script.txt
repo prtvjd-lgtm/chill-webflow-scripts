@@ -1,0 +1,49 @@
+<!-- Скрытие фона у чётных CMS-карточек на мобильных -->
+<style>
+@media screen and (max-width: 990px) {
+  [data-cms-alt-card-backgrounds] [data-cms-alt-card-background][data-cms-alt-card-background-hidden="true"] {
+    display: none !important;
+  }
+}
+</style>
+
+<script>
+(function () {
+  var LIST_SELECTOR = '[data-cms-alt-card-backgrounds]';
+  var BACKGROUND_SELECTOR = '[data-cms-alt-card-background]';
+  var HIDDEN_ATTRIBUTE = 'data-cms-alt-card-background-hidden';
+  var mobileQuery = window.matchMedia('(max-width: 990px)');
+
+  function updateBackgrounds() {
+    var isMobile = mobileQuery.matches;
+
+    Array.prototype.forEach.call(document.querySelectorAll(LIST_SELECTOR), function (list) {
+      var backgrounds = list.querySelectorAll(BACKGROUND_SELECTOR);
+
+      Array.prototype.forEach.call(backgrounds, function (background, index) {
+        if (isMobile && index % 2 === 1) {
+          background.setAttribute(HIDDEN_ATTRIBUTE, 'true');
+        } else {
+          background.removeAttribute(HIDDEN_ATTRIBUTE);
+        }
+      });
+    });
+  }
+
+  function init() {
+    updateBackgrounds();
+
+    if (mobileQuery.addEventListener) {
+      mobileQuery.addEventListener('change', updateBackgrounds);
+    } else {
+      mobileQuery.addListener(updateBackgrounds);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>

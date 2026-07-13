@@ -83,6 +83,7 @@ const embeds = {
     return getSection('webflow-all-tabs-scripts.txt', '<!-- Табы практик -->');
   },
   practiceCardVideo: function () { return readSource('practice-card-video-script.txt'); },
+  cmsAlternatingCardBackgrounds: function () { return readSource('cms-alternating-card-backgrounds-script.txt'); },
   cmsFaq: function () { return readSource('cms-faq-accordion-script.txt'); },
   practiceQueryNavigation: function () { return readSource('practice-query-navigation-script.txt'); },
   cmsLogoMarquee: function () { return readSource('cms-logo-marquee-script.txt'); },
@@ -107,6 +108,7 @@ const bundles = {
     'tabsBrush',
     'practiceTabs',
     'practiceCardVideo',
+    'cmsAlternatingCardBackgrounds',
     'cmsFaq',
     'practiceQueryNavigation',
     'contentTabs',
