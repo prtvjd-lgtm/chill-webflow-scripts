@@ -222,6 +222,15 @@ document.addEventListener("DOMContentLoaded", function () {
       });
     }
 
+    popup.querySelectorAll(".close-button").forEach(function (closeButton) {
+      closeButton.addEventListener("click", function (event) {
+        if (window.innerWidth > 991) return;
+
+        event.preventDefault();
+        closePopup(popup);
+      });
+    });
+
     document.body.appendChild(popup);
 
     return popup;
