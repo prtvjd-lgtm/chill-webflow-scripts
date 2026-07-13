@@ -1054,7 +1054,7 @@
         var desiredIndex = Number.isFinite(mover.flowIndex) ? mover.flowIndex : mover.anchorIndex;
 
         if (mover.fixedMobileAnchor) {
-          var fixedPlacement = getItemPlacement(
+          var fixedNaturalPlacement = getItemPlacement(
             mover,
             desiredIndex,
             points,
@@ -1064,8 +1064,25 @@
             globalMotion,
             itemRect
           );
+          var fixedPlacement = fitItemPlacementToViewport(
+            fixedNaturalPlacement,
+            itemRect,
+            stageRect
+          );
+          var fixedAdjustment = Math.hypot(
+            fixedPlacement.x - fixedNaturalPlacement.x,
+            fixedPlacement.y - fixedNaturalPlacement.y
+          );
+          var fixedCandidate = {
+            index: desiredIndex,
+            placement: fixedPlacement,
+            itemRect: itemRect,
+            mover: mover
+          };
 
           occupiedPlacements.push(getItemPlacementBounds(fixedPlacement, itemRect, stageRect));
+          placements.push(fixedCandidate);
+          needsConstraint = needsConstraint || fixedAdjustment > 1;
           return;
         }
 
