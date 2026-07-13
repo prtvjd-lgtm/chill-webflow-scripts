@@ -64,6 +64,7 @@ const embeds = {
   studioMediaGallery: function () { return readSource('studio-media-gallery-script.txt'); },
   studioMap: function () { return readSource('studio-map-yandex-script.txt'); },
   contactsAnchor: function () { return readSource('contacts-anchor-scroll-script.txt'); },
+  subscriptionsAnchorOffset: function () { return readSource('subscriptions-anchor-offset-style.txt'); },
   siteNoise: function () { return readSource('site-noise-script.txt'); },
   tabsBrush: function () {
     return getSection(
@@ -104,6 +105,7 @@ const bundles = {
     'studioMediaGallery',
     'studioMap',
     'contactsAnchor',
+    'subscriptionsAnchorOffset',
     'siteNoise',
     'tabsBrush',
     'practiceTabs',

@@ -1,0 +1,6 @@
+<!-- Отступ якоря абонементов -->
+<style>
+  #subscriptions {
+    scroll-margin-top: 140px;
+  }
+</style>
