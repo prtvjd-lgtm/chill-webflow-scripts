@@ -940,6 +940,7 @@
   function resetHoverCardInlineStyles(card) {
     clearHoverCardSwapAnimation(card);
     clearHoverCardContentAnimation(card);
+    clearHoverCardPositionAnimation(card);
     clearHoverCardHideTimer(card);
     card.style.display = '';
     card.style.visibility = '';
@@ -956,6 +957,80 @@
   function clearHoverCardHideTimer(card) {
     window.clearTimeout(card.__practiceHoverHideTimer);
     card.__practiceHoverHideTimer = null;
+  }
+
+  function getAnimationTime() {
+    return window.performance && typeof window.performance.now === 'function'
+      ? window.performance.now()
+      : Date.now();
+  }
+
+  function getHoverCardTranslateY(card) {
+    const transform = window.getComputedStyle(card).transform;
+    const match = transform && transform.match(/^matrix(3d)?\((.+)\)$/);
+
+    if (!match) return 0;
+
+    const values = match[2].split(',').map(Number);
+    const translateY = match[1] ? values[13] : values[5];
+
+    return Number.isFinite(translateY) ? translateY : 0;
+  }
+
+  function clearHoverCardPositionAnimation(card) {
+    window.clearTimeout(card.__practiceHoverPositionAnimationTimer);
+    card.__practiceHoverPositionAnimationTimer = null;
+    card.__practiceHoverPositionAnimation = null;
+  }
+
+  function setHoverCardPositionAnimation(card, startTime, duration) {
+    clearHoverCardPositionAnimation(card);
+
+    const remainingDuration = Math.max(0, duration - (getAnimationTime() - startTime));
+
+    if (!remainingDuration) return null;
+
+    const animation = {
+      startTime: startTime,
+      duration: duration
+    };
+
+    card.__practiceHoverPositionAnimation = animation;
+    card.__practiceHoverPositionAnimationTimer = window.setTimeout(function () {
+      if (card.__practiceHoverPositionAnimation === animation) {
+        clearHoverCardPositionAnimation(card);
+      }
+    }, remainingDuration + 80);
+
+    return animation;
+  }
+
+  function getHoverCardPositionAnimation(card) {
+    const offsetY = getHoverCardTranslateY(card);
+
+    if (Math.abs(offsetY) < 0.1) return null;
+
+    const animation = card.__practiceHoverPositionAnimation;
+
+    if (!animation) {
+      return {
+        offsetY: offsetY,
+        startTime: getAnimationTime(),
+        duration: HOVER_ANIMATION.showDuration,
+        remainingDuration: HOVER_ANIMATION.showDuration
+      };
+    }
+
+    const remainingDuration = Math.max(0, animation.duration - (getAnimationTime() - animation.startTime));
+
+    if (!remainingDuration) return null;
+
+    return {
+      offsetY: offsetY,
+      startTime: animation.startTime,
+      duration: animation.duration,
+      remainingDuration: remainingDuration
+    };
   }
 
   function getHoverCardTextElements(card) {
@@ -1092,6 +1167,7 @@
   function hideHoverCard(card, immediately) {
     clearHoverCardSwapAnimation(card);
     clearHoverCardContentAnimation(card);
+    clearHoverCardPositionAnimation(card);
     clearHoverCardHideTimer(card);
 
     if (immediately || card.style.display === 'none' || card.style.visibility === 'hidden') {
@@ -1285,6 +1361,10 @@
     const previousRect = previousHoverCard.getBoundingClientRect();
     const previousHeight = previousRect.height || previousHoverCard.offsetHeight;
     const initialHeight = Math.max(previousHeight, 0);
+    const positionAnimation = getHoverCardPositionAnimation(previousHoverCard);
+    const positionOffsetY = positionAnimation ? positionAnimation.offsetY : 0;
+    const finalTop = previousRect.top - positionOffsetY;
+    const finalBottom = previousRect.bottom - positionOffsetY;
 
     stopObservingHoverCard();
     hoverCards.forEach(function (card) {
@@ -1295,11 +1375,12 @@
 
     clearHoverCardHideTimer(hoverCard);
     clearHoverCardSwapAnimation(hoverCard);
+    clearHoverCardPositionAnimation(hoverCard);
     hoverCard.style.display = 'flex';
     hoverCard.style.visibility = 'hidden';
     hoverCard.style.transition = 'none';
     hoverCard.style.opacity = '';
-    hoverCard.style.transform = 'translateY(0)';
+    hoverCard.style.transform = 'translateY(' + positionOffsetY + 'px)';
     hoverCard.style.pointerEvents = 'none';
 
     const usesBoundedPosition = usesBoundedHoverPosition(hoverCard);
@@ -1307,7 +1388,7 @@
     if (usesBoundedPosition) {
       hoverCard.style.position = 'fixed';
       hoverCard.style.left = HOVER_VIEWPORT_OFFSET + 'px';
-      hoverCard.style.top = Math.round(previousRect.top) + 'px';
+      hoverCard.style.top = Math.round(finalTop) + 'px';
       hoverCard.style.bottom = 'auto';
     }
 
@@ -1318,7 +1399,7 @@
     hoverCard.style.overflow = 'hidden';
     const targetHeight = hoverCard.getBoundingClientRect().height || hoverCard.offsetHeight;
     const targetTop = usesBoundedPosition
-      ? Math.round(previousRect.bottom - targetHeight)
+      ? Math.round(finalBottom - targetHeight)
       : null;
     const contentAnimation = prepareHoverCardContentAnimation(hoverCard);
     const animation = {
@@ -1330,6 +1411,14 @@
 
     hoverCard.style.height = initialHeight + 'px';
     hoverCard.__practiceHoverSwapAnimation = animation;
+
+    if (positionAnimation) {
+      setHoverCardPositionAnimation(
+        hoverCard,
+        positionAnimation.startTime,
+        positionAnimation.duration
+      );
+    }
 
     window.requestAnimationFrame(function () {
       if (activeHoverCard !== hoverCard || hoverCard.style.display === 'none') return;
@@ -1344,17 +1433,26 @@
           'height ' + HOVER_CONTENT_ANIMATION.duration + 'ms ' + HOVER_CONTENT_ANIMATION.easing +
           (usesBoundedPosition
             ? ', top ' + HOVER_CONTENT_ANIMATION.duration + 'ms ' + HOVER_CONTENT_ANIMATION.easing
+            : '') +
+          (positionAnimation
+            ? ', transform ' + positionAnimation.remainingDuration + 'ms ' + HOVER_ANIMATION.showEasing
             : '');
         hoverCard.style.height = targetHeight + 'px';
         if (targetTop !== null) {
           hoverCard.style.top = targetTop + 'px';
+        }
+        if (positionAnimation) {
+          hoverCard.style.transform = 'translateY(0)';
         }
         contentAnimation.play();
         animation.timer = window.setTimeout(function () {
           if (hoverCard.__practiceHoverSwapAnimation !== animation) return;
 
           clearHoverCardSwapAnimation(hoverCard);
-        }, HOVER_CONTENT_ANIMATION.duration + 80);
+        }, Math.max(
+          HOVER_CONTENT_ANIMATION.duration,
+          positionAnimation ? positionAnimation.remainingDuration : 0
+        ) + 80);
       });
     });
   }
@@ -1415,6 +1513,11 @@
 
         hoverCard.style.transition =
           'transform ' + HOVER_ANIMATION.showDuration + 'ms ' + HOVER_ANIMATION.showEasing;
+        setHoverCardPositionAnimation(
+          hoverCard,
+          getAnimationTime(),
+          HOVER_ANIMATION.showDuration
+        );
         hoverCard.style.transform = 'translateY(0)';
       });
     });
