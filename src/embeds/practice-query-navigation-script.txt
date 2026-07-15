@@ -14,7 +14,10 @@
   const ALL_TAB_SLUG = 'vse';
   const TAB_SWITCH_SCROLL_DELAY = 720;
   const MAX_SCROLL_ATTEMPTS = 30;
-  const SCROLL_DURATION = 600;
+  const SCROLL_DURATION = 1000;
+  const PREFETCH_ATTRIBUTE = 'data-chill-practice-prefetch';
+  const PREFETCH_ROOT_MARGIN = '800px 0px';
+  let isPracticePagePrefetched = false;
 
   function normalize(value) {
     return String(value || '').trim().toLowerCase();
@@ -31,7 +34,7 @@
   }
 
   function buildPracticeUrl(path, slug) {
-    return normalizePath(path) + '?' + QUERY_PARAM + '=' + encodeURIComponent(slug);
+    return normalizePath(path) + '#' + QUERY_PARAM + '=' + encodeURIComponent(slug);
   }
 
   function isLinkElement(element) {
@@ -89,8 +92,12 @@
     });
   }
 
+  function getPracticeLinks() {
+    return Array.from(document.querySelectorAll(LINK_SELECTOR));
+  }
+
   function updatePracticeLinks() {
-    document.querySelectorAll(LINK_SELECTOR).forEach(function (element) {
+    getPracticeLinks().forEach(function (element) {
       const slug = normalizeSlug(element.getAttribute(LINK_SLUG_ATTRIBUTE));
 
       if (!slug) return;
@@ -106,7 +113,81 @@
   }
 
   function getQuerySlug() {
-    return normalize(new URLSearchParams(window.location.search).get(QUERY_PARAM));
+    const querySlug = normalize(new URLSearchParams(window.location.search).get(QUERY_PARAM));
+
+    if (querySlug) return querySlug;
+
+    return normalize(new URLSearchParams(window.location.hash.slice(1)).get(QUERY_PARAM));
+  }
+
+  function canPrefetchPracticePage() {
+    const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+
+    return !connection || (
+      !connection.saveData &&
+      connection.effectiveType !== 'slow-2g' &&
+      connection.effectiveType !== '2g'
+    );
+  }
+
+  function prefetchPracticePage(path) {
+    const targetPath = normalizePath(path);
+
+    if (
+      isPracticePagePrefetched ||
+      window.location.pathname === targetPath ||
+      !document.head ||
+      !canPrefetchPracticePage()
+    ) return;
+
+    const existingPrefetch = document.head.querySelector('link[' + PREFETCH_ATTRIBUTE + '="true"]');
+
+    if (existingPrefetch) {
+      isPracticePagePrefetched = true;
+      return;
+    }
+
+    const prefetch = document.createElement('link');
+
+    prefetch.rel = 'prefetch';
+    prefetch.as = 'document';
+    prefetch.href = targetPath;
+    prefetch.setAttribute(PREFETCH_ATTRIBUTE, 'true');
+    document.head.appendChild(prefetch);
+    isPracticePagePrefetched = true;
+  }
+
+  function setupPracticePagePrefetch() {
+    const links = getPracticeLinks();
+
+    if (!links.length || !canPrefetchPracticePage()) return;
+
+    const targetPath = normalizePath(links[0].getAttribute(TARGET_PATH_ATTRIBUTE));
+    const prefetch = function () {
+      prefetchPracticePage(targetPath);
+    };
+
+    links.forEach(function (element) {
+      element.addEventListener('pointerenter', prefetch, { once: true, passive: true });
+      element.addEventListener('focus', prefetch, { once: true, passive: true });
+      element.addEventListener('touchstart', prefetch, { once: true, passive: true });
+    });
+
+    if (!window.IntersectionObserver) return;
+
+    const observer = new IntersectionObserver(function (entries) {
+      if (!entries.some(function (entry) { return entry.isIntersecting; })) return;
+
+      prefetch();
+      observer.disconnect();
+    }, {
+      rootMargin: PREFETCH_ROOT_MARGIN,
+      threshold: 0
+    });
+
+    links.forEach(function (element) {
+      observer.observe(element);
+    });
   }
 
   function getPracticeSlug(practice) {
@@ -273,6 +354,7 @@
 
   function init() {
     updatePracticeLinks();
+    setupPracticePagePrefetch();
     openPracticeFromQuery();
   }
 
