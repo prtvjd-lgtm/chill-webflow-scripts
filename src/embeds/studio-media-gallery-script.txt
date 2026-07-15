@@ -30,16 +30,19 @@
   height: 100%;
   overflow: hidden;
   opacity: 0;
+  transform: scale(1.1);
   visibility: hidden;
   pointer-events: none;
-  transition: opacity 450ms cubic-bezier(0.215, 0.61, 0.355, 1), visibility 0s linear 450ms;
+  will-change: opacity, transform;
+  transition: opacity 600ms cubic-bezier(0.075, 0.82, 0.165, 1), transform 600ms cubic-bezier(0.075, 0.82, 0.165, 1), visibility 0s linear 600ms;
 }
 
 [data-studio-gallery="slide"].is-active {
   opacity: 1;
+  transform: scale(1);
   visibility: visible;
   pointer-events: auto;
-  transition: opacity 450ms cubic-bezier(0.215, 0.61, 0.355, 1);
+  transition: opacity 600ms cubic-bezier(0.075, 0.82, 0.165, 1), transform 600ms cubic-bezier(0.075, 0.82, 0.165, 1);
 }
 
 [data-studio-gallery="slide"] video {
@@ -85,8 +88,11 @@
   const VIDEO_ERROR_CLASS = 'is-video-error';
   const MOBILE_BREAKPOINT = 991;
   const SWIPE_DISTANCE = 40;
+  const AUTO_PLAY_INTERVAL = 4000;
   const DOT_SELECTOR = '[data-cms-slider="dot"]';
   const PAGINATION_SELECTOR = '[data-cms-slider="dots"]';
+  const PREV_BUTTON_SELECTOR = '[data-cms-slider="prev"]';
+  const NEXT_BUTTON_SELECTOR = '[data-cms-slider="next"]';
   const INTERACTIVE_SELECTOR = [
     'a',
     'button',
@@ -97,7 +103,9 @@
     'summary',
     '[role="button"]',
     '[data-cms-slider="dots"]',
-    '[data-cms-slider="dot"]'
+    '[data-cms-slider="dot"]',
+    PREV_BUTTON_SELECTOR,
+    NEXT_BUTTON_SELECTOR
   ].join(',');
 
   function selector(name) {
@@ -191,11 +199,15 @@
       .map(createGalleryState)
       .filter(Boolean);
     const pagination = root.querySelector(PAGINATION_SELECTOR);
+    const prevButton = root.querySelector(PREV_BUTTON_SELECTOR);
+    const nextButton = root.querySelector(NEXT_BUTTON_SELECTOR);
     const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
     let activeState = null;
-    let rootIsVisible = true;
+    let rootIsVisible = !('IntersectionObserver' in window);
     let paginationController = null;
     let touchStart = null;
+    let autoplayTimer = null;
+    let ignoreGalleryClickUntil = 0;
 
     if (!studioStates.length) return;
 
@@ -239,7 +251,37 @@
       paginationController.update(activeState.index);
     }
 
-    function goToSlide(targetIndex) {
+    function shouldAutoplay() {
+      return Boolean(
+        activeState &&
+        activeState.slides.length > 1 &&
+        rootIsVisible &&
+        !document.hidden &&
+        !(reducedMotion && reducedMotion.matches)
+      );
+    }
+
+    function clearAutoplay() {
+      if (autoplayTimer === null) return;
+
+      window.clearTimeout(autoplayTimer);
+      autoplayTimer = null;
+    }
+
+    function scheduleAutoplay() {
+      clearAutoplay();
+      if (!shouldAutoplay()) return;
+
+      autoplayTimer = window.setTimeout(function () {
+        autoplayTimer = null;
+        if (!shouldAutoplay()) return;
+
+        goToSlide((activeState.index + 1) % activeState.slides.length, false);
+        scheduleAutoplay();
+      }, AUTO_PLAY_INTERVAL);
+    }
+
+    function goToSlide(targetIndex, shouldRestartAutoplay) {
       if (!activeState) return;
 
       const maxIndex = activeState.slides.length - 1;
@@ -251,6 +293,10 @@
       renderSlides(activeState);
       updateDots();
       syncPlayback();
+
+      if (shouldRestartAutoplay !== false) {
+        scheduleAutoplay();
+      }
     }
 
     if (pagination && window.ChillCmsPagination) {
@@ -295,6 +341,7 @@
 
       updateDots();
       syncPlayback();
+      scheduleAutoplay();
     }
 
     function isGalleryTarget(target) {
@@ -330,15 +377,33 @@
     });
 
     root.addEventListener('click', function (event) {
-      if (window.innerWidth <= MOBILE_BREAKPOINT) return;
       if (!activeState || activeState.slides.length < 2) return;
       if (!isGalleryTarget(event.target) || isStudioCardTarget(event.target) || event.target.closest(INTERACTIVE_SELECTOR)) return;
+      if (Date.now() < ignoreGalleryClickUntil) return;
 
       const rect = root.getBoundingClientRect();
       const direction = event.clientX < rect.left + rect.width / 2 ? -1 : 1;
 
       goToSlide(activeState.index + direction);
     });
+
+    if (prevButton) {
+      prevButton.addEventListener('click', function (event) {
+        event.preventDefault();
+        if (!activeState || activeState.slides.length < 2) return;
+
+        goToSlide(activeState.index - 1);
+      });
+    }
+
+    if (nextButton) {
+      nextButton.addEventListener('click', function (event) {
+        event.preventDefault();
+        if (!activeState || activeState.slides.length < 2) return;
+
+        goToSlide(activeState.index + 1);
+      });
+    }
 
     root.addEventListener('touchstart', function (event) {
       if (window.innerWidth > MOBILE_BREAKPOINT || event.touches.length !== 1) return;
@@ -367,6 +432,7 @@
 
       if (Math.abs(deltaX) < SWIPE_DISTANCE || Math.abs(deltaX) <= Math.abs(deltaY)) return;
 
+      ignoreGalleryClickUntil = Date.now() + 500;
       goToSlide(activeState.index + (deltaX < 0 ? 1 : -1));
     }, {
       passive: true
@@ -378,7 +444,10 @@
       passive: true
     });
 
-    document.addEventListener('visibilitychange', syncPlayback);
+    document.addEventListener('visibilitychange', function () {
+      syncPlayback();
+      scheduleAutoplay();
+    });
 
     if ('IntersectionObserver' in window) {
       const observer = new IntersectionObserver(function (entries) {
@@ -386,6 +455,7 @@
           return entry.isIntersecting;
         });
         syncPlayback();
+        scheduleAutoplay();
       }, {
         threshold: 0.05
       });
@@ -394,7 +464,10 @@
     }
 
     if (reducedMotion && typeof reducedMotion.addEventListener === 'function') {
-      reducedMotion.addEventListener('change', syncPlayback);
+      reducedMotion.addEventListener('change', function () {
+        syncPlayback();
+        scheduleAutoplay();
+      });
     }
 
     setActiveStudio(studioStates[0]);
