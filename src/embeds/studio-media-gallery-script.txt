@@ -256,6 +256,9 @@
     if (pagination && window.ChillCmsPagination) {
       paginationController = window.ChillCmsPagination.create({
         getDots: getDots,
+        getMaxIndex: function () {
+          return activeState ? activeState.slides.length - 1 : 0;
+        },
         targetAttribute: 'data-cms-slider-target',
         getTargetIndex: function (dotIndex, activeIndex, dotCount) {
           return window.ChillCmsPagination.getWindowedTargetIndex(

@@ -19,6 +19,59 @@
       return Array.from(options.getDots ? options.getDots() : []);
     }
 
+    function getMaxIndex() {
+      const maxIndex = typeof options.getMaxIndex === 'function'
+        ? Number(options.getMaxIndex())
+        : NaN;
+
+      return Number.isFinite(maxIndex) ? Math.max(0, Math.floor(maxIndex)) : null;
+    }
+
+    function getVisibleDotCount(allDots) {
+      const maxIndex = getMaxIndex();
+      const hasNextPage = Boolean(
+        typeof options.hasNextPage === 'function' && options.hasNextPage()
+      );
+
+      if (maxIndex === null) return Math.min(3, allDots.length);
+      if (maxIndex === 0 && !hasNextPage) return 0;
+
+      return Math.min(allDots.length, Math.max(2, Math.min(3, maxIndex + 1)));
+    }
+
+    function restoreAttribute(dot, name, value) {
+      if (value === null) {
+        dot.removeAttribute(name);
+      } else {
+        dot.setAttribute(name, value);
+      }
+    }
+
+    function setDotVisibility(dot, isVisible) {
+      if (!dot.__chillPaginationVisibility) {
+        dot.__chillPaginationVisibility = {
+          ariaHidden: dot.getAttribute('aria-hidden'),
+          display: dot.style.display,
+          tabIndex: dot.getAttribute('tabindex')
+        };
+      }
+
+      const savedState = dot.__chillPaginationVisibility;
+
+      if (isVisible) {
+        dot.style.display = savedState.display;
+        restoreAttribute(dot, 'aria-hidden', savedState.ariaHidden);
+        restoreAttribute(dot, 'tabindex', savedState.tabIndex);
+        return;
+      }
+
+      dot.style.display = 'none';
+      dot.classList.remove(activeClass);
+      dot.setAttribute('aria-current', 'false');
+      dot.setAttribute('aria-hidden', 'true');
+      dot.setAttribute('tabindex', '-1');
+    }
+
     function getTargetValue(dot) {
       const value = dot.getAttribute(targetAttribute);
       const targetIndex = value === null ? NaN : Number(value);
@@ -298,7 +351,14 @@
     }
 
     function refresh() {
-      dots = getDots();
+      const allDots = getDots();
+      const visibleDotCount = getVisibleDotCount(allDots);
+
+      allDots.forEach(function (dot, dotIndex) {
+        setDotVisibility(dot, dotIndex < visibleDotCount);
+      });
+
+      dots = allDots.slice(0, visibleDotCount);
       dots.forEach(bindDot);
       return dots;
     }

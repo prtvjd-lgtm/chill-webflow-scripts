@@ -356,6 +356,10 @@
         getDots: function () {
           return root.querySelectorAll(selector('dot'));
         },
+        getMaxIndex: getMaxIndex,
+        hasNextPage: function () {
+          return Boolean(nextPageUrl);
+        },
         targetAttribute: 'data-cms-slider-target',
         getTargetIndex: function (dotIndex, activeIndex, dotCount) {
           return window.ChillCmsPagination.getWindowedTargetIndex(
