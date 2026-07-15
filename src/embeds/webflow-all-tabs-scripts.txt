@@ -1071,10 +1071,10 @@
     card.__practiceHoverContentAnimation = null;
   }
 
-  function prepareHoverCardContentAnimation(card) {
+  function prepareHoverCardContentAnimation(card, animateText) {
     clearHoverCardContentAnimation(card);
 
-    const textEntries = getHoverCardTextElements(card).map(function (element) {
+    const textEntries = (animateText === false ? [] : getHoverCardTextElements(card)).map(function (element) {
       const entry = {
         element: element,
         opacity: element.style.opacity,
@@ -1341,7 +1341,7 @@
       if (shouldKeepHoverCardVisible(card)) {
         resetHoverCardInlineStyles(card);
       } else {
-        hideHoverCard(card);
+        hideHoverCard(card, true);
       }
     });
   }
@@ -1361,10 +1361,20 @@
     const previousRect = previousHoverCard.getBoundingClientRect();
     const previousHeight = previousRect.height || previousHoverCard.offsetHeight;
     const initialHeight = Math.max(previousHeight, 0);
-    const positionAnimation = getHoverCardPositionAnimation(previousHoverCard);
+    const transferredPositionAnimation = getHoverCardPositionAnimation(previousHoverCard);
+    const positionAnimation = transferredPositionAnimation || (
+      isPracticePageHoverCard(hoverCard)
+        ? {
+            offsetY: HOVER_ANIMATION.offsetY,
+            startTime: getAnimationTime(),
+            duration: HOVER_ANIMATION.showDuration,
+            remainingDuration: HOVER_ANIMATION.showDuration
+          }
+        : null
+    );
     const positionOffsetY = positionAnimation ? positionAnimation.offsetY : 0;
-    const finalTop = previousRect.top - positionOffsetY;
-    const finalBottom = previousRect.bottom - positionOffsetY;
+    const finalTop = previousRect.top - (transferredPositionAnimation ? positionOffsetY : 0);
+    const finalBottom = previousRect.bottom - (transferredPositionAnimation ? positionOffsetY : 0);
 
     stopObservingHoverCard();
     hoverCards.forEach(function (card) {
@@ -1497,6 +1507,7 @@
     hoverCard.style.transition = 'none';
     hoverCard.style.opacity = '';
     hoverCard.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
+    const mediaAnimation = prepareHoverCardContentAnimation(hoverCard, false);
 
     requestAnimationFrame(function () {
       if (activeHoverCard !== hoverCard || hoverCard.style.display === 'none') return;
@@ -1519,6 +1530,7 @@
           HOVER_ANIMATION.showDuration
         );
         hoverCard.style.transform = 'translateY(0)';
+        mediaAnimation.play();
       });
     });
   }
