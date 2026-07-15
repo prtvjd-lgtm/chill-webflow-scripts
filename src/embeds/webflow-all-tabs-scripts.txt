@@ -453,7 +453,7 @@
       Math.ceil(labelRect.height + (brushState.paddingY / brushState.heightScale + BRUSH_INSET) * 2)
     );
     const centerX = labelRect.left - tabRect.left + labelRect.width / 2;
-    const centerY = labelRect.top - tabRect.top + labelRect.height / 2 - brushState.paddingY / 2;
+    const centerY = labelRect.top - tabRect.top + labelRect.height / 2 - brushState.paddingY / 4;
 
     brush.innerHTML = '';
     brush.style.width = width + 'px';
