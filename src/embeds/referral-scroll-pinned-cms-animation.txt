@@ -4,13 +4,13 @@
 @media screen and (min-width: 992px) {
   .referral-scroll-wrap.is-referral-scroll-enabled {
     position: relative;
-    min-height: calc(225svh - 108px);
+    min-height: calc(225dvh - 108px);
   }
 
   .referral-scroll-wrap.is-referral-scroll-enabled .referral-scroll {
     position: sticky;
     top: 24px;
-    height: calc(100svh - 48px);
+    height: calc(100dvh - 48px);
     overflow: hidden;
     isolation: iolate;
   }
