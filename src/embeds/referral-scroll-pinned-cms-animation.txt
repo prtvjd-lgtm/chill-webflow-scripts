@@ -63,8 +63,7 @@
 
   const BREAKPOINT = 992;
   const HEADER_HEIGHT = 24;
-  const INTRO_FINAL_TOP = 64;
-  const CARDS_FINAL_TOP = 320;
+  const FINAL_CONTENT_GAP = 80;
   const SIDE_GUTTER = 80;
   const OFFSCREEN_GAP = 32;
   const SCRUB_DURATION = 0.3;
@@ -293,6 +292,9 @@
       stageHeight: stageRect.height,
       listOffsetX: listRect.left - stageRect.left,
       introHeight: introRect.height,
+      cardRowHeight: Math.max.apply(null, Object.keys(cardMetrics).map(function (name) {
+        return cardMetrics[name].height;
+      })),
       cards: cardMetrics
     };
   }
@@ -379,7 +381,9 @@
     const metrics = context.metrics;
     const introProgress = progress;
     const introStartY = (metrics.stageHeight - metrics.introHeight) / 2;
-    const introY = interpolate(introStartY, INTRO_FINAL_TOP, introProgress);
+    const introFinalY = (metrics.stageHeight - metrics.introHeight - FINAL_CONTENT_GAP - metrics.cardRowHeight) / 2;
+    const cardsFinalY = introFinalY + metrics.introHeight + FINAL_CONTENT_GAP;
+    const introY = interpolate(introStartY, introFinalY, introProgress);
 
     context.intro.style.transform = 'translate3d(-50%, ' + introY + 'px, 0)';
 
@@ -391,7 +395,7 @@
         ? -cardMetrics.height - OFFSCREEN_GAP
         : metrics.stageHeight + OFFSCREEN_GAP;
       const x = getFinalX(name, metrics);
-      const y = interpolate(startY, CARDS_FINAL_TOP, cardProgress);
+      const y = interpolate(startY, cardsFinalY, cardProgress);
 
       card.style.transform = 'translate3d(' + x + 'px, ' + y + 'px, 0)';
     });
