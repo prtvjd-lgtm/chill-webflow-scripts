@@ -11,10 +11,10 @@
   const PRACTICE_SLUG_ATTRIBUTE = 'data-practice-slug';
   const PRACTICE_TAG_SELECTOR = '[data-practice-card-tag]';
   const PRACTICE_TAB_SELECTOR = '[data-practice-tab]';
-  const ACTIVE_TAB_SCROLL_DELAY = 120;
+  const ALL_TAB_SLUG = 'vse';
   const TAB_SWITCH_SCROLL_DELAY = 720;
   const MAX_SCROLL_ATTEMPTS = 30;
-  const SCROLL_DURATION = 1000;
+  const SCROLL_DURATION = 600;
 
   function normalize(value) {
     return String(value || '').trim().toLowerCase();
@@ -132,8 +132,14 @@
   }
 
   function findTabForPractice(practice) {
-    const tags = getPracticeTags(practice);
     const tabs = Array.from(document.querySelectorAll(PRACTICE_TAB_SELECTOR));
+    const allTab = tabs.find(function (tab) {
+      return normalize(tab.getAttribute('data-practice-tab')) === ALL_TAB_SLUG;
+    });
+
+    if (allTab) return allTab;
+
+    const tags = getPracticeTags(practice);
     const activeTab = tabs.find(function (tab) {
       return tab.classList.contains(ACTIVE_TAB_CLASS);
     });
@@ -237,6 +243,12 @@
     scrollToPractice(practice);
   }
 
+  function scheduleScrollToPractice(practice) {
+    window.requestAnimationFrame(function () {
+      scrollWhenVisible(practice, 0);
+    });
+  }
+
   function openPracticeFromQuery() {
     const slug = getQuerySlug();
 
@@ -247,16 +259,16 @@
     if (!practice) return;
 
     const tab = findTabForPractice(practice);
-    let delay = ACTIVE_TAB_SCROLL_DELAY;
 
     if (tab && !tab.classList.contains(ACTIVE_TAB_CLASS)) {
       tab.click();
-      delay = TAB_SWITCH_SCROLL_DELAY;
+      window.setTimeout(function () {
+        scheduleScrollToPractice(practice);
+      }, TAB_SWITCH_SCROLL_DELAY);
+      return;
     }
 
-    window.setTimeout(function () {
-      scrollWhenVisible(practice, 0);
-    }, delay);
+    scheduleScrollToPractice(practice);
   }
 
   function init() {
