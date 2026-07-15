@@ -1357,19 +1357,20 @@
     const previousHeight = previousRect.height || previousHoverCard.offsetHeight;
     const initialHeight = Math.max(previousHeight, 0);
     const transferredPositionAnimation = getHoverCardPositionAnimation(previousHoverCard);
-    const positionAnimation = transferredPositionAnimation || (
-      isPracticePageHoverCard(hoverCard)
-        ? {
-            offsetY: HOVER_ANIMATION.offsetY,
-            startTime: getAnimationTime(),
-            duration: HOVER_ANIMATION.showDuration,
-            remainingDuration: HOVER_ANIMATION.showDuration
-          }
-        : null
-    );
+    const transferredOffsetY = transferredPositionAnimation
+      ? transferredPositionAnimation.offsetY
+      : 0;
+    const positionAnimation = isPracticePageHoverCard(hoverCard)
+      ? {
+          offsetY: HOVER_ANIMATION.offsetY,
+          startTime: getAnimationTime(),
+          duration: HOVER_ANIMATION.showDuration,
+          remainingDuration: HOVER_ANIMATION.showDuration
+        }
+      : transferredPositionAnimation;
     const positionOffsetY = positionAnimation ? positionAnimation.offsetY : 0;
-    const finalTop = previousRect.top - (transferredPositionAnimation ? positionOffsetY : 0);
-    const finalBottom = previousRect.bottom - (transferredPositionAnimation ? positionOffsetY : 0);
+    const finalTop = previousRect.top - transferredOffsetY;
+    const finalBottom = previousRect.bottom - transferredOffsetY;
 
     stopObservingHoverCard();
     hoverCards.forEach(function (card) {
