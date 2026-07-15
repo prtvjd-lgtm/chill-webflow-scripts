@@ -47,7 +47,6 @@
     brushColor: 'var(--main-orange)',
     paddingX: 10,
     paddingY: 6,
-    minWidth: 74,
     minHeight: 32,
     points: 24,
     seed: 999,
@@ -205,7 +204,6 @@
     if (usesMobileBrushState()) {
       runtime.paddingX *= MOBILE_PADDING_X_SCALE;
       runtime.paddingY *= MOBILE_PADDING_Y_SCALE;
-      runtime.minWidth = 0;
       runtime.minHeight = 0;
 
       MOBILE_STROKE_KEYS.forEach(function (key) {
@@ -444,10 +442,7 @@
     brushState = getScaledBrushState(labelRect.width, labelRect.height);
     window.__tabsBrushRuntimeState = brushState;
 
-    const width = Math.max(
-      brushState.minWidth,
-      Math.ceil(labelRect.width + (brushState.paddingX + BRUSH_INSET) * 2)
-    );
+    const width = Math.ceil(labelRect.width + (brushState.paddingX + BRUSH_INSET) * 2);
     const height = Math.max(
       brushState.minHeight,
       Math.ceil(labelRect.height + (brushState.paddingY / brushState.heightScale + BRUSH_INSET) * 2)
