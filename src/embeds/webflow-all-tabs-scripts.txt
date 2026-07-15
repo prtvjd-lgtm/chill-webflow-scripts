@@ -886,6 +886,7 @@
   let hoverPositionFrame = null;
   let hoverResizeObserver = null;
   let hoverAssetsPreloaded = false;
+  let hoverSequenceActive = false;
   let listAnimationTimers = [];
   let resizeTimer = null;
 
@@ -929,6 +930,7 @@
     card.style.display = '';
     card.style.visibility = '';
     card.style.transition = '';
+    card.style.opacity = '';
     card.style.transform = '';
     card.style.pointerEvents = '';
     card.style.position = '';
@@ -938,10 +940,11 @@
   }
 
   function hideHoverCard(card) {
-    card.style.display = 'none';
     card.style.visibility = '';
     card.style.transition = 'none';
+    card.style.opacity = '';
     card.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
+    card.style.display = 'none';
   }
 
   function prepareHoverCard(card) {
@@ -1082,9 +1085,12 @@
     observer.observe(list);
   }
 
-  function hideAllHoverCards() {
+  function hideAllHoverCards(preserveHoverSequence) {
     activeHoverPractice = null;
     activeHoverCard = null;
+    if (!preserveHoverSequence) {
+      hoverSequenceActive = false;
+    }
     window.clearTimeout(hoverHideTimer);
     window.cancelAnimationFrame(hoverPositionFrame);
     stopObservingHoverCard();
@@ -1098,15 +1104,15 @@
     });
   }
 
-  function showHoverCard(practice) {
+  function showHoverCard(practice, useOpacity) {
     if (!canShowHoverCards()) {
       hideAllHoverCards();
-      return;
+      return false;
     }
 
     const hoverCard = practice.querySelector(HOVER_CARD_SELECTOR);
 
-    if (!hoverCard) return;
+    if (!hoverCard) return false;
 
     activeHoverPractice = practice;
     activeHoverCard = hoverCard;
@@ -1115,17 +1121,17 @@
 
     hoverCards.forEach(function (card) {
       if (card !== hoverCard) {
-        card.style.display = 'none';
-        card.style.visibility = '';
-        card.style.transition = 'none';
-        card.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
+        hideHoverCard(card);
       }
     });
 
     hoverCard.style.display = 'flex';
     hoverCard.style.visibility = 'hidden';
     hoverCard.style.transition = 'none';
-    hoverCard.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
+    hoverCard.style.opacity = useOpacity ? '0' : '';
+    hoverCard.style.transform = useOpacity
+      ? 'translateY(0)'
+      : 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
 
     requestAnimationFrame(function () {
       if (activeHoverCard !== hoverCard || hoverCard.style.display === 'none') return;
@@ -1140,11 +1146,19 @@
       requestAnimationFrame(function () {
         if (activeHoverCard !== hoverCard || hoverCard.style.display === 'none') return;
 
-        hoverCard.style.transition =
-          'transform ' + HOVER_ANIMATION.showDuration + 'ms ' + HOVER_ANIMATION.showEasing;
-        hoverCard.style.transform = 'translateY(0)';
+        if (useOpacity) {
+          hoverCard.style.transition =
+            'opacity ' + HOVER_ANIMATION.showDuration + 'ms ' + HOVER_ANIMATION.showEasing;
+          hoverCard.style.opacity = '1';
+        } else {
+          hoverCard.style.transition =
+            'transform ' + HOVER_ANIMATION.showDuration + 'ms ' + HOVER_ANIMATION.showEasing;
+          hoverCard.style.transform = 'translateY(0)';
+        }
       });
     });
+
+    return true;
   }
 
   function clearListAnimation() {
@@ -1344,15 +1358,27 @@
   }
 
   function preparePractices() {
+    const practiceList = getPracticeList();
+
+    if (practiceList) {
+      practiceList.addEventListener('mouseleave', function () {
+        hideAllHoverCards();
+      });
+    }
+
     practices.forEach(function (practice) {
       practice.addEventListener('mouseenter', function () {
         if (practice.style.display === 'none' || !canShowHoverCards()) return;
-        showHoverCard(practice);
+        const useOpacity = hoverSequenceActive;
+
+        if (showHoverCard(practice, useOpacity)) {
+          hoverSequenceActive = true;
+        }
       });
 
       practice.addEventListener('mouseleave', function () {
         if (activeHoverPractice === practice) {
-          hideAllHoverCards();
+          hideAllHoverCards(true);
         }
       });
     });
