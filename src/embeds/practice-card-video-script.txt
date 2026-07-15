@@ -1,6 +1,7 @@
 <!-- Видео в карточках практик -->
 <style>
 .practice-hover-card[data-practice-video-url]:not([data-practice-video-url=""]):not(.is-practice-video-error) > .image,
+.practice-hover-card[data-practice-video-url]:not([data-practice-video-url=""]):not(.is-practice-video-error) > .image-wrapper > .image,
 .practice-hover-card[data-practice-video-url]:not([data-practice-video-url=""]):not(.is-practice-video-error) > .practice-card-media > .image {
   visibility: hidden !important;
 }
@@ -17,7 +18,12 @@
   width: 100%;
 }
 
-.practice-card-media > .practice-card-video {
+.image-wrapper[data-practice-card-media] {
+  position: relative;
+}
+
+.practice-card-media > .practice-card-video,
+.image-wrapper[data-practice-card-media] > .practice-card-video {
   position: absolute;
   inset: 0;
   display: block;
@@ -28,7 +34,8 @@
   pointer-events: none;
 }
 
-.practice-hover-card.is-practice-video-ready .practice-card-media > .practice-card-video {
+.practice-hover-card.is-practice-video-ready .practice-card-media > .practice-card-video,
+.practice-hover-card.is-practice-video-ready .image-wrapper[data-practice-card-media] > .practice-card-video {
   opacity: 1;
 }
 </style>
@@ -76,10 +83,19 @@
       return null;
     }
 
-    const image = hoverCard.querySelector(':scope > .image');
-    const media = document.createElement('div');
+    const imageWrapper = hoverCard.querySelector(':scope > .image-wrapper');
+    const image = imageWrapper
+      ? imageWrapper.querySelector(':scope > .image')
+      : hoverCard.querySelector(':scope > .image');
+    const media = imageWrapper || document.createElement('div');
     const video = document.createElement('video');
-    media.className = 'practice-card-media';
+
+    if (imageWrapper) {
+      media.setAttribute('data-practice-card-media', '');
+    } else {
+      media.className = 'practice-card-media';
+    }
+
     video.className = 'practice-card-video';
     video.src = source;
     video.muted = true;
@@ -101,7 +117,11 @@
       video.remove();
     }, { once: true });
 
-    if (image) {
+    if (imageWrapper) {
+      if (image) {
+        image.loading = 'eager';
+      }
+    } else if (image) {
       image.loading = 'eager';
       image.insertAdjacentElement('beforebegin', media);
       media.appendChild(image);

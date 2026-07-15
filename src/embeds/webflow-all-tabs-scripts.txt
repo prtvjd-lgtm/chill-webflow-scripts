@@ -960,13 +960,14 @@
 
   function getHoverCardTextElements(card) {
     return Array.from(card.children).filter(function (element) {
-      return !element.matches('.image, .practice-card-media');
+      return !element.matches('.image, .image-wrapper, .practice-card-media');
     });
   }
 
   function getHoverCardMediaElements(card) {
     return Array.from(card.querySelectorAll(
-      ':scope > .image, :scope > .practice-card-media > .image, :scope > .practice-card-media > .practice-card-video'
+      ':scope > .image, :scope > .image-wrapper > .image, :scope > .image-wrapper > .practice-card-video, ' +
+      ':scope > .practice-card-media > .image, :scope > .practice-card-media > .practice-card-video'
     ));
   }
 
