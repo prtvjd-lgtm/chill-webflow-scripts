@@ -284,8 +284,8 @@
     function goToSlide(targetIndex, shouldRestartAutoplay) {
       if (!activeState) return;
 
-      const maxIndex = activeState.slides.length - 1;
-      const nextIndex = Math.max(0, Math.min(targetIndex, maxIndex));
+      const slideCount = activeState.slides.length;
+      const nextIndex = ((targetIndex % slideCount) + slideCount) % slideCount;
 
       if (nextIndex === activeState.index) return;
 
