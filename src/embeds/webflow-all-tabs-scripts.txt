@@ -890,6 +890,7 @@
   let activeHoverPractice = null;
   let activeHoverCard = null;
   let hoverHideTimer = null;
+  let lastHoverPointerPosition = null;
   let hoverPositionFrame = null;
   let hoverResizeObserver = null;
   let hoverAssetsPreloaded = false;
@@ -1341,15 +1342,20 @@
     });
   }
 
-  function scheduleHoverCardHide(practice) {
-    window.clearTimeout(hoverHideTimer);
-    hoverHideTimer = window.setTimeout(function () {
-      hoverHideTimer = null;
+  function trackHoverPointerPosition(event) {
+    lastHoverPointerPosition = {
+      x: event.clientX,
+      y: event.clientY
+    };
+  }
 
-      if (activeHoverPractice === practice) {
-        hideAllHoverCards();
-      }
-    }, 0);
+  function didHoverPointerMove(event) {
+    if (!lastHoverPointerPosition) return true;
+
+    return (
+      event.clientX !== lastHoverPointerPosition.x ||
+      event.clientY !== lastHoverPointerPosition.y
+    );
   }
 
   function showSwappedHoverCard(hoverCard, previousHoverCard) {
@@ -1731,16 +1737,45 @@
 
   function preparePractices() {
     practices.forEach(function (practice) {
-      practice.addEventListener('mouseenter', function () {
+      practice.addEventListener('mouseenter', function (event) {
         if (practice.style.display === 'none' || !canShowHoverCards()) return;
+
+        const hoverCard = practice.querySelector(HOVER_CARD_SELECTOR);
+        const shouldKeepCurrentHoverCard =
+          hoverCard &&
+          isPracticePageHoverCard(hoverCard) &&
+          activeHoverPractice &&
+          activeHoverPractice !== practice &&
+          !didHoverPointerMove(event);
+
+        if (shouldKeepCurrentHoverCard) return;
+
+        trackHoverPointerPosition(event);
         showHoverCard(practice);
       });
+    });
 
-      practice.addEventListener('mouseleave', function () {
-        if (activeHoverPractice === practice) {
-          scheduleHoverCardHide(practice);
-        }
-      });
+    const list = getPracticeList();
+
+    if (!list) return;
+
+    list.addEventListener('mousemove', function (event) {
+      trackHoverPointerPosition(event);
+
+      const practice = event.target.closest(PRACTICE_CARD_SELECTOR);
+
+      if (
+        !practice ||
+        !practices.includes(practice) ||
+        practice === activeHoverPractice ||
+        practice.style.display === 'none' ||
+        !canShowHoverCards()
+      ) return;
+
+      showHoverCard(practice);
+    });
+    list.addEventListener('mouseleave', function () {
+      hideAllHoverCards();
     });
   }
 
