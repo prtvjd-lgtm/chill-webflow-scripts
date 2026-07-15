@@ -1302,7 +1302,9 @@
     hoverCard.style.transform = 'translateY(0)';
     hoverCard.style.pointerEvents = 'none';
 
-    if (usesBoundedHoverPosition(hoverCard)) {
+    const usesBoundedPosition = usesBoundedHoverPosition(hoverCard);
+
+    if (usesBoundedPosition) {
       hoverCard.style.position = 'fixed';
       hoverCard.style.left = HOVER_VIEWPORT_OFFSET + 'px';
       hoverCard.style.top = Math.round(previousRect.top) + 'px';
@@ -1315,6 +1317,9 @@
     hoverCard.style.height = '';
     hoverCard.style.overflow = 'hidden';
     const targetHeight = hoverCard.getBoundingClientRect().height || hoverCard.offsetHeight;
+    const targetTop = usesBoundedPosition
+      ? Math.round(previousRect.bottom - targetHeight)
+      : null;
     const contentAnimation = prepareHoverCardContentAnimation(hoverCard);
     const animation = {
       height: originalHeight,
@@ -1336,8 +1341,14 @@
         if (activeHoverCard !== hoverCard || hoverCard.style.display === 'none') return;
 
         hoverCard.style.transition =
-          'height ' + HOVER_CONTENT_ANIMATION.duration + 'ms ' + HOVER_CONTENT_ANIMATION.easing;
+          'height ' + HOVER_CONTENT_ANIMATION.duration + 'ms ' + HOVER_CONTENT_ANIMATION.easing +
+          (usesBoundedPosition
+            ? ', top ' + HOVER_CONTENT_ANIMATION.duration + 'ms ' + HOVER_CONTENT_ANIMATION.easing
+            : '');
         hoverCard.style.height = targetHeight + 'px';
+        if (targetTop !== null) {
+          hoverCard.style.top = targetTop + 'px';
+        }
         contentAnimation.play();
         animation.timer = window.setTimeout(function () {
           if (hoverCard.__practiceHoverSwapAnimation !== animation) return;
