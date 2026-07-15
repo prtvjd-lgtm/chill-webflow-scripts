@@ -114,8 +114,23 @@
     return {
       card: card,
       hoverCard: hoverCard,
-      video: video
+      video: video,
+      preloadRequested: false
     };
+  }
+
+  function isVisible(state) {
+    return state.card.getClientRects().length > 0 && window.getComputedStyle(state.card).display !== 'none';
+  }
+
+  function preloadVisibleVideos() {
+    states.forEach(function (state) {
+      if (!isVisible(state) || state.preloadRequested) return;
+
+      state.preloadRequested = true;
+      state.video.preload = 'auto';
+      state.video.load();
+    });
   }
 
   function pauseAll(exceptState) {
@@ -160,6 +175,9 @@
         if (reducedMotion.matches) pauseAll();
       });
     }
+
+    window.addEventListener('practice-hover-cards-changed', preloadVisibleVideos);
+    preloadVisibleVideos();
   }
 
   if (window.Webflow && typeof window.Webflow.push === 'function') {
