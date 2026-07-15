@@ -874,7 +874,10 @@
   const HOVER_ANIMATION = {
     showDuration: 1200,
     showEasing: 'cubic-bezier(0.075, 0.82, 0.165, 1)',
-    offsetY: 20
+    offsetY: 20,
+    hideDuration: 300,
+    hideEasing: 'cubic-bezier(0.075, 0.82, 0.165, 1)',
+    hideOffsetY: -10
   };
 
   let tabs = [];
@@ -926,9 +929,11 @@
   }
 
   function resetHoverCardInlineStyles(card) {
+    clearHoverCardHideTimer(card);
     card.style.display = '';
     card.style.visibility = '';
     card.style.transition = '';
+    card.style.opacity = '';
     card.style.transform = '';
     card.style.pointerEvents = '';
     card.style.position = '';
@@ -937,11 +942,33 @@
     card.style.bottom = '';
   }
 
-  function hideHoverCard(card) {
-    card.style.display = 'none';
+  function clearHoverCardHideTimer(card) {
+    window.clearTimeout(card.__practiceHoverHideTimer);
+    card.__practiceHoverHideTimer = null;
+  }
+
+  function hideHoverCard(card, immediately) {
+    clearHoverCardHideTimer(card);
+
+    if (immediately || card.style.display === 'none' || card.style.visibility === 'hidden') {
+      card.style.display = 'none';
+      card.style.visibility = '';
+      card.style.transition = 'none';
+      card.style.opacity = '';
+      card.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
+      return;
+    }
+
     card.style.visibility = '';
-    card.style.transition = 'none';
-    card.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
+    card.style.pointerEvents = 'none';
+    card.style.transition =
+      'opacity ' + HOVER_ANIMATION.hideDuration + 'ms ' + HOVER_ANIMATION.hideEasing +
+      ', transform ' + HOVER_ANIMATION.hideDuration + 'ms ' + HOVER_ANIMATION.hideEasing;
+    card.style.opacity = '0';
+    card.style.transform = 'translateY(' + HOVER_ANIMATION.hideOffsetY + 'px)';
+    card.__practiceHoverHideTimer = window.setTimeout(function () {
+      hideHoverCard(card, true);
+    }, HOVER_ANIMATION.hideDuration + 80);
   }
 
   function prepareHoverCard(card) {
@@ -950,7 +977,7 @@
       return;
     }
 
-    hideHoverCard(card);
+    hideHoverCard(card, true);
     card.style.transition =
       'transform ' + HOVER_ANIMATION.showDuration + 'ms ' + HOVER_ANIMATION.showEasing;
     card.style.pointerEvents = 'none';
@@ -1115,16 +1142,15 @@
 
     hoverCards.forEach(function (card) {
       if (card !== hoverCard) {
-        card.style.display = 'none';
-        card.style.visibility = '';
-        card.style.transition = 'none';
-        card.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
+        hideHoverCard(card);
       }
     });
 
+    clearHoverCardHideTimer(hoverCard);
     hoverCard.style.display = 'flex';
     hoverCard.style.visibility = 'hidden';
     hoverCard.style.transition = 'none';
+    hoverCard.style.opacity = '';
     hoverCard.style.transform = 'translateY(' + HOVER_ANIMATION.offsetY + 'px)';
 
     requestAnimationFrame(function () {
