@@ -34,7 +34,7 @@
   visibility: hidden;
   pointer-events: none;
   will-change: opacity, transform;
-  transition: opacity 600ms cubic-bezier(0.075, 0.82, 0.165, 1), transform 600ms cubic-bezier(0.075, 0.82, 0.165, 1), visibility 0s linear 600ms;
+  transition: opacity 600ms cubic-bezier(0.075, 0.82, 0.165, 1), transform 1200ms cubic-bezier(0.16, 1, 0.3, 1), visibility 0s linear 1200ms;
 }
 
 [data-studio-gallery="slide"].is-active {
@@ -42,7 +42,7 @@
   transform: scale(1);
   visibility: visible;
   pointer-events: auto;
-  transition: opacity 600ms cubic-bezier(0.075, 0.82, 0.165, 1), transform 600ms cubic-bezier(0.075, 0.82, 0.165, 1);
+  transition: opacity 600ms cubic-bezier(0.075, 0.82, 0.165, 1), transform 1200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 [data-studio-gallery="slide"] video {
