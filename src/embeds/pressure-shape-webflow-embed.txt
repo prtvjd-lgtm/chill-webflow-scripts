@@ -875,6 +875,8 @@
         return null;
       }
 
+      if (window.getComputedStyle(mask).position === 'static') mask.style.position = 'relative';
+
       var video = document.createElement('video');
 
       video.className = 'pressure-shape-photo-layer pressure-shape-video';
