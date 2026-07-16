@@ -963,11 +963,10 @@
           }
 
           showVideoAsPoster(mask, video);
+          startVideoPlayback(video);
           video.style.opacity = '0';
           video.style.transform = 'scale(' + CONFIG.introPhotoScale + ')';
-          playPhotoIntro(video, function () {
-            startVideoPlayback(video);
-          });
+          playPhotoIntro(video);
         });
         return;
       }
