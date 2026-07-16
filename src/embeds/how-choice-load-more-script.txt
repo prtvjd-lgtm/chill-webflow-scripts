@@ -12,7 +12,6 @@
 
   var ROOT_SELECTOR = '.how-choice-block';
   var BUTTON_SELECTOR = '[data-how-choice-load-more]';
-  var LABEL_SELECTOR = '[data-how-choice-load-more-label]';
   var APPEAR_ANIMATION = {
     duration: 600,
     stagger: 70,
@@ -39,7 +38,7 @@
       root: root,
       rootIndex: rootIndex,
       button: button,
-      label: button.querySelector(LABEL_SELECTOR),
+      labelTextNode: getButtonTextNode(button),
       itemsContainer: itemsContainer,
       hiddenItems: [],
       loadedUrls: new Set([new URL(window.location.href).href]),
@@ -57,7 +56,7 @@
     };
 
     state.nextPageUrl = getNextPageUrl(root, window.location.href, state.loadedUrls);
-    state.initialLabel = state.label ? state.label.textContent : '';
+    state.initialLabel = state.labelTextNode ? state.labelTextNode.nodeValue : '';
 
     ensurePreloaded(state);
     updateButton(state);
@@ -99,6 +98,23 @@
 
     function getMatchingRoot(doc, index) {
       return doc.querySelectorAll(ROOT_SELECTOR)[index] || null;
+    }
+
+    function getButtonTextNode(element) {
+      var nodes = element.childNodes;
+
+      for (var index = 0; index < nodes.length; index += 1) {
+        var node = nodes[index];
+
+        if (node.nodeType === 3 && node.nodeValue.trim()) return node;
+        if (node.nodeType === 1) {
+          var nestedTextNode = getButtonTextNode(node);
+
+          if (nestedTextNode) return nestedTextNode;
+        }
+      }
+
+      return null;
     }
 
     function ensurePreloaded(currentState) {
@@ -220,11 +236,18 @@
         currentState.isExpanded ? 'true' : 'false'
       );
 
-      if (currentState.label) {
-        currentState.label.textContent = currentState.isExpanded
-          ? 'Показать меньше'
+      if (currentState.labelTextNode) {
+        currentState.labelTextNode.nodeValue = currentState.isExpanded
+          ? getExpandedLabel(currentState.initialLabel)
           : currentState.initialLabel;
       }
+    }
+
+    function getExpandedLabel(initialLabel) {
+      var leadingWhitespace = (initialLabel.match(/^\s*/) || [''])[0];
+      var trailingWhitespace = (initialLabel.match(/\s*$/) || [''])[0];
+
+      return leadingWhitespace + 'Показать меньше' + trailingWhitespace;
     }
 
     function setLoading(currentState, isLoading) {
