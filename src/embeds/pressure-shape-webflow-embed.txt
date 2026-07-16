@@ -875,12 +875,15 @@
         return null;
       }
 
-      if (window.getComputedStyle(mask).position === 'static') mask.style.position = 'relative';
+      var layer = mask.querySelector('[data-pressure-video-layer="true"]');
 
-      var layer = document.createElement('div');
+      if (!layer) {
+        mask.classList.add('is-pressure-video-error');
+        return null;
+      }
+
       var video = document.createElement('video');
 
-      layer.className = 'pressure-shape-photo-layer pressure-shape-video-layer';
       video.className = 'pressure-shape-video';
       video.src = source;
       video.muted = true;
@@ -956,7 +959,7 @@
           if (!isReady) {
             mask.classList.add('is-pressure-video-error');
             mask.__pressureIntro.waitForMedia = false;
-            layer.remove();
+            video.remove();
             startBackgroundIntro(mask);
             return;
           }
