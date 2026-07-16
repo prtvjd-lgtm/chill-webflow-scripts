@@ -12,6 +12,13 @@
 
   var ROOT_SELECTOR = '.how-choice-block';
   var BUTTON_SELECTOR = '[data-how-choice-load-more]';
+  var LABEL_SELECTOR = '[data-how-choice-load-more-label]';
+  var APPEAR_ANIMATION = {
+    duration: 600,
+    stagger: 70,
+    offsetY: 20,
+    easing: 'cubic-bezier(0.075, 0.82, 0.165, 1)'
+  };
 
   function initAll() {
     Array.prototype.forEach.call(document.querySelectorAll(ROOT_SELECTOR), initBlock);
@@ -28,67 +35,44 @@
 
     root.dataset.howChoiceLoadMoreReady = 'true';
 
-    var loadedUrls = new Set([new URL(window.location.href).href]);
-    var nextPageUrl = getNextPageUrl(root, window.location.href, loadedUrls);
-    var initialButtonDisplay = button.style.display;
-    var initialPointerEvents = button.style.pointerEvents;
-    var isButtonElement = button.tagName === 'BUTTON';
-    var initialDisabled = isButtonElement ? button.disabled : false;
+    var state = {
+      root: root,
+      rootIndex: rootIndex,
+      button: button,
+      label: button.querySelector(LABEL_SELECTOR),
+      itemsContainer: itemsContainer,
+      hiddenItems: [],
+      loadedUrls: new Set([new URL(window.location.href).href]),
+      nextPageUrl: '',
+      isExpanded: false,
+      isPreloading: false,
+      preloadPromise: null,
+      appearanceFrame: 0,
+      appearanceTimers: [],
+      initialButtonDisplay: button.style.display,
+      initialPointerEvents: button.style.pointerEvents,
+      isButtonElement: button.tagName === 'BUTTON',
+      initialDisabled: button.tagName === 'BUTTON' ? button.disabled : false,
+      initialLabel: ''
+    };
 
-    updateButtonVisibility();
+    state.nextPageUrl = getNextPageUrl(root, window.location.href, state.loadedUrls);
+    state.initialLabel = state.label ? state.label.textContent : '';
+
+    ensurePreloaded(state);
+    updateButton(state);
 
     button.addEventListener('click', function (event) {
       event.preventDefault();
 
-      if (!nextPageUrl || button.dataset.howChoiceLoadMoreLoading === 'true') return;
+      if (state.button.dataset.howChoiceLoadMoreLoading === 'true') return;
 
-      var pageUrl = nextPageUrl;
-      loadedUrls.add(pageUrl);
-      setLoading(true);
+      if (state.isExpanded) {
+        collapseItems(state);
+        return;
+      }
 
-      fetch(pageUrl, { credentials: 'same-origin' })
-        .then(function (response) {
-          if (!response.ok) {
-            throw new Error('Не удалось загрузить следующую страницу CMS.');
-          }
-
-          return response.text().then(function (html) {
-            return {
-              html: html,
-              url: response.url
-            };
-          });
-        })
-        .then(function (result) {
-          var doc = new DOMParser().parseFromString(result.html, 'text/html');
-          var fetchedRoot = getMatchingRoot(doc, rootIndex);
-          var fetchedList = fetchedRoot && getCmsList(fetchedRoot);
-          var fetchedItemsContainer = fetchedList && fetchedList.querySelector('.w-dyn-items');
-
-          if (!fetchedItemsContainer) {
-            throw new Error('Не найден CMS-список на следующей странице.');
-          }
-
-          Array.prototype.forEach.call(fetchedItemsContainer.children, function (item) {
-            itemsContainer.appendChild(document.importNode(item, true));
-          });
-
-          nextPageUrl = getNextPageUrl(fetchedRoot, result.url, loadedUrls);
-          updateButtonVisibility();
-
-          document.dispatchEvent(new CustomEvent('how-choice:more-loaded', {
-            detail: {
-              root: root
-            }
-          }));
-        })
-        .catch(function (error) {
-          loadedUrls.delete(pageUrl);
-          console.warn('How choice: ', error);
-        })
-        .then(function () {
-          setLoading(false);
-        });
+      expandItems(state);
     });
 
     function getCmsList(scope) {
@@ -117,28 +101,351 @@
       return doc.querySelectorAll(ROOT_SELECTOR)[index] || null;
     }
 
-    function updateButtonVisibility() {
-      var isVisible = Boolean(nextPageUrl);
+    function ensurePreloaded(currentState) {
+      if (currentState.isPreloading) return currentState.preloadPromise;
+      if (!currentState.nextPageUrl) return Promise.resolve();
 
-      button.style.display = isVisible ? initialButtonDisplay : 'none';
-      button.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+      currentState.isPreloading = true;
+      currentState.preloadPromise = preloadRemainingPages(currentState)
+        .catch(function (error) {
+          console.warn('How choice: ', error);
+        })
+        .then(function () {
+          currentState.isPreloading = false;
+          updateButton(currentState);
+        });
+
+      return currentState.preloadPromise;
     }
 
-    function setLoading(isLoading) {
-      if (isLoading) {
-        button.dataset.howChoiceLoadMoreLoading = 'true';
-        button.style.pointerEvents = 'none';
-        button.setAttribute('aria-busy', 'true');
+    function preloadRemainingPages(currentState) {
+      if (!currentState.nextPageUrl) return Promise.resolve();
 
-        if (isButtonElement) button.disabled = true;
+      var pageUrl = currentState.nextPageUrl;
+      currentState.loadedUrls.add(pageUrl);
+
+      return fetch(pageUrl, { credentials: 'same-origin' })
+        .then(function (response) {
+          if (!response.ok) {
+            throw new Error('Не удалось предварительно загрузить страницу CMS.');
+          }
+
+          return response.text().then(function (html) {
+            return {
+              html: html,
+              url: response.url
+            };
+          });
+        })
+        .then(function (result) {
+          var doc = new DOMParser().parseFromString(result.html, 'text/html');
+          var fetchedRoot = getMatchingRoot(doc, currentState.rootIndex);
+          var fetchedList = fetchedRoot && getCmsList(fetchedRoot);
+          var fetchedItemsContainer = fetchedList && fetchedList.querySelector('.w-dyn-items');
+
+          if (!fetchedItemsContainer) {
+            throw new Error('Не найден CMS-список на следующей странице.');
+          }
+
+          Array.prototype.forEach.call(fetchedItemsContainer.children, function (item) {
+            var importedItem = document.importNode(item, true);
+
+            hideItem(importedItem);
+            currentState.itemsContainer.appendChild(importedItem);
+            currentState.hiddenItems.push(importedItem);
+          });
+
+          currentState.nextPageUrl = getNextPageUrl(
+            fetchedRoot,
+            result.url,
+            currentState.loadedUrls
+          );
+
+          return preloadRemainingPages(currentState);
+        })
+        .catch(function (error) {
+          currentState.loadedUrls.delete(pageUrl);
+          throw error;
+        });
+    }
+
+    function expandItems(currentState) {
+      setLoading(currentState, true);
+
+      ensurePreloaded(currentState)
+        .then(function () {
+          if (!currentState.hiddenItems.length) {
+            updateButton(currentState);
+            return;
+          }
+
+          currentState.isExpanded = true;
+          updateButton(currentState);
+          animateElementHeight(currentState.root, function () {
+            revealItems(currentState);
+          });
+
+          document.dispatchEvent(new CustomEvent('how-choice:more-loaded', {
+            detail: {
+              root: currentState.root
+            }
+          }));
+        })
+        .then(function () {
+          setLoading(currentState, false);
+        });
+    }
+
+    function collapseItems(currentState) {
+      clearAppearanceAnimation(currentState);
+      currentState.isExpanded = false;
+      updateButton(currentState);
+      animateElementHeight(currentState.root, function () {
+        currentState.hiddenItems.forEach(hideItem);
+      });
+    }
+
+    function updateButton(currentState) {
+      var isVisible = Boolean(
+        currentState.hiddenItems.length ||
+        (!currentState.isPreloading && currentState.nextPageUrl)
+      );
+
+      currentState.button.style.display = isVisible
+        ? currentState.initialButtonDisplay
+        : 'none';
+      currentState.button.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+      currentState.button.setAttribute(
+        'aria-expanded',
+        currentState.isExpanded ? 'true' : 'false'
+      );
+
+      if (currentState.label) {
+        currentState.label.textContent = currentState.isExpanded
+          ? 'Показать меньше'
+          : currentState.initialLabel;
+      }
+    }
+
+    function setLoading(currentState, isLoading) {
+      if (isLoading) {
+        currentState.button.dataset.howChoiceLoadMoreLoading = 'true';
+        currentState.button.style.pointerEvents = 'none';
+        currentState.button.setAttribute('aria-busy', 'true');
+
+        if (currentState.isButtonElement) currentState.button.disabled = true;
         return;
       }
 
-      delete button.dataset.howChoiceLoadMoreLoading;
-      button.style.pointerEvents = initialPointerEvents;
-      button.removeAttribute('aria-busy');
+      delete currentState.button.dataset.howChoiceLoadMoreLoading;
+      currentState.button.style.pointerEvents = currentState.initialPointerEvents;
+      currentState.button.removeAttribute('aria-busy');
 
-      if (isButtonElement) button.disabled = initialDisabled;
+      if (currentState.isButtonElement) currentState.button.disabled = currentState.initialDisabled;
+    }
+
+    function getItemState(item) {
+      if (item.__chillHowChoiceLoadMoreState) {
+        return item.__chillHowChoiceLoadMoreState;
+      }
+
+      item.__chillHowChoiceLoadMoreState = {
+        display: item.style.display,
+        ariaHidden: item.getAttribute('aria-hidden')
+      };
+
+      return item.__chillHowChoiceLoadMoreState;
+    }
+
+    function restoreAttribute(element, name, value) {
+      if (value === null) {
+        element.removeAttribute(name);
+        return;
+      }
+
+      element.setAttribute(name, value);
+    }
+
+    function hideItem(item) {
+      var itemState = getItemState(item);
+
+      restoreItemAppearance(item);
+      item.style.display = 'none';
+      item.setAttribute('aria-hidden', 'true');
+      return itemState;
+    }
+
+    function showItem(item) {
+      var itemState = getItemState(item);
+
+      item.style.display = itemState.display;
+      restoreAttribute(item, 'aria-hidden', itemState.ariaHidden);
+    }
+
+    function saveItemAppearance(item) {
+      if (item.__chillHowChoiceLoadMoreAppearance) {
+        return item.__chillHowChoiceLoadMoreAppearance;
+      }
+
+      item.__chillHowChoiceLoadMoreAppearance = {
+        opacity: item.style.opacity,
+        transform: item.style.transform,
+        transition: item.style.transition,
+        willChange: item.style.willChange,
+        baseTransform: ''
+      };
+
+      return item.__chillHowChoiceLoadMoreAppearance;
+    }
+
+    function restoreItemAppearance(item) {
+      var appearance = item.__chillHowChoiceLoadMoreAppearance;
+
+      if (!appearance) return;
+
+      item.style.opacity = appearance.opacity;
+      item.style.transform = appearance.transform;
+      item.style.transition = appearance.transition;
+      item.style.willChange = appearance.willChange;
+      delete item.__chillHowChoiceLoadMoreAppearance;
+    }
+
+    function prepareItemAppearance(item) {
+      var appearance = saveItemAppearance(item);
+      var computedTransform = window.getComputedStyle(item).transform;
+
+      appearance.baseTransform = computedTransform === 'none' ? '' : computedTransform;
+      item.style.opacity = '0';
+      item.style.transform = appearance.baseTransform
+        ? appearance.baseTransform + ' translateY(' + APPEAR_ANIMATION.offsetY + 'px)'
+        : 'translateY(' + APPEAR_ANIMATION.offsetY + 'px)';
+      item.style.transition = 'none';
+      item.style.willChange = 'opacity, transform';
+    }
+
+    function revealItems(currentState) {
+      clearAppearanceAnimation(currentState);
+      currentState.hiddenItems.forEach(showItem);
+
+      if (prefersReducedMotion()) return;
+
+      currentState.hiddenItems.forEach(prepareItemAppearance);
+      currentState.itemsContainer.getBoundingClientRect();
+      currentState.appearanceFrame = window.requestAnimationFrame(function () {
+        currentState.hiddenItems.forEach(function (item, index) {
+          var timer = window.setTimeout(function () {
+            var appearance = item.__chillHowChoiceLoadMoreAppearance;
+
+            if (!appearance) return;
+
+            item.style.transition =
+              'opacity ' + APPEAR_ANIMATION.duration + 'ms ' + APPEAR_ANIMATION.easing +
+              ', transform ' + APPEAR_ANIMATION.duration + 'ms ' + APPEAR_ANIMATION.easing;
+            item.style.opacity = '1';
+            item.style.transform = appearance.baseTransform;
+          }, index * APPEAR_ANIMATION.stagger);
+
+          currentState.appearanceTimers.push(timer);
+        });
+
+        var cleanupTimer = window.setTimeout(function () {
+          clearAppearanceAnimation(currentState);
+        },
+        Math.max(0, currentState.hiddenItems.length - 1) * APPEAR_ANIMATION.stagger +
+          APPEAR_ANIMATION.duration +
+          80);
+
+        currentState.appearanceTimers.push(cleanupTimer);
+      });
+    }
+
+    function clearAppearanceAnimation(currentState) {
+      window.cancelAnimationFrame(currentState.appearanceFrame);
+      currentState.appearanceFrame = 0;
+      currentState.appearanceTimers.forEach(function (timer) {
+        window.clearTimeout(timer);
+      });
+      currentState.appearanceTimers = [];
+      currentState.hiddenItems.forEach(restoreItemAppearance);
+    }
+
+    function prefersReducedMotion() {
+      return Boolean(
+        window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      );
+    }
+
+    function getElementMinHeight(element) {
+      var minHeight = parseFloat(window.getComputedStyle(element).minHeight);
+
+      return Number.isFinite(minHeight) ? minHeight : 0;
+    }
+
+    function finishHeightAnimation(element) {
+      var heightState = element.__chillHowChoiceLoadMoreHeight;
+
+      if (!heightState) return;
+
+      window.clearTimeout(heightState.timer);
+      element.removeEventListener('transitionend', heightState.onEnd);
+      element.style.height = heightState.height;
+      element.style.overflow = heightState.overflow;
+      element.style.transition = heightState.transition;
+      delete element.__chillHowChoiceLoadMoreHeight;
+    }
+
+    function animateElementHeight(element, changeContent) {
+      if (!element || prefersReducedMotion()) {
+        changeContent();
+        return;
+      }
+
+      finishHeightAnimation(element);
+
+      var initialStyles = {
+        height: element.style.height,
+        overflow: element.style.overflow,
+        transition: element.style.transition
+      };
+      var minHeight = getElementMinHeight(element);
+      var startHeight = Math.max(element.getBoundingClientRect().height, minHeight);
+
+      element.style.height = startHeight + 'px';
+      element.style.overflow = 'hidden';
+      element.style.transition = 'none';
+
+      changeContent();
+
+      element.style.height = 'auto';
+      var endHeight = Math.max(element.getBoundingClientRect().height, minHeight);
+      element.style.height = startHeight + 'px';
+
+      element.getBoundingClientRect();
+      element.style.transition =
+        'height ' + APPEAR_ANIMATION.duration + 'ms ' + APPEAR_ANIMATION.easing;
+      element.style.height = endHeight + 'px';
+
+      var heightState = {
+        height: initialStyles.height,
+        overflow: initialStyles.overflow,
+        transition: initialStyles.transition,
+        timer: 0,
+        onEnd: null
+      };
+
+      function cleanupHeight(event) {
+        if (event && (event.target !== element || event.propertyName !== 'height')) return;
+
+        finishHeightAnimation(element);
+      }
+
+      heightState.onEnd = cleanupHeight;
+      heightState.timer = window.setTimeout(
+        cleanupHeight,
+        APPEAR_ANIMATION.duration + 80
+      );
+      element.__chillHowChoiceLoadMoreHeight = heightState;
+      element.addEventListener('transitionend', cleanupHeight);
     }
   }
 
