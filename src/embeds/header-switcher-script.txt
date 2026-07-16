@@ -10,6 +10,7 @@
   const HEADER_HIDE_SELECTOR = '.header-hide-section';
   const HEADER_HEIGHT = 53;
   const HEADER_HIDE_OFFSET = 24;
+  const MOBILE_BREAKPOINT = 991;
   const POINTS = [0.12, 0.3, 0.5, 0.7, 0.88];
   const ITEMS_SELECTOR = '.logo, .main-button';
   const EASING = 'cubic-bezier(0.215, 0.61, 0.355, 1)';
@@ -54,12 +55,22 @@
   function update() {
     updateHeaderPadding();
 
+    const nextVariant = getNextHeaderVariant();
+
+    if (isMobileHeaderMode()) {
+      if (headerHidden) {
+        showHeader(nextVariant, false);
+        return;
+      }
+
+      if (nextVariant !== activeVariant) switchHeader(nextVariant, false);
+      return;
+    }
+
     if (shouldHideHeader()) {
       if (!headerHidden) hideCurrentHeader();
       return;
     }
-
-    const nextVariant = getNextHeaderVariant();
 
     if (headerHidden) {
       showHeader(nextVariant);
@@ -79,6 +90,11 @@
     });
   }
 
+  function isMobileHeaderMode() {
+    const width = window.innerWidth || document.documentElement.clientWidth;
+    return width <= MOBILE_BREAKPOINT;
+  }
+
   function hideCurrentHeader() {
     const header = getCurrentHeader();
     if (!header) return;
@@ -92,13 +108,13 @@
     });
   }
 
-  function showHeader(nextVariant) {
+  function showHeader(nextVariant, shouldAnimate) {
     headerHidden = false;
     [whiteHeader, orangeHeader].forEach(function (header) {
       header.style.pointerEvents = '';
     });
 
-    switchHeader(nextVariant || activeVariant || getVisibleVariant() || 'orange');
+    switchHeader(nextVariant || activeVariant || getVisibleVariant() || 'orange', shouldAnimate);
   }
 
   function getNextHeaderVariant() {
@@ -107,7 +123,7 @@
   }
 
   function updateHeaderPadding() {
-    const nextWidePadding = isOverWideHeaderBlock();
+    const nextWidePadding = !isMobileHeaderMode() && isOverWideHeaderBlock();
     if (nextWidePadding === activeWidePadding) return;
 
     activeWidePadding = nextWidePadding;
@@ -250,7 +266,9 @@
       : whiteHeader;
   }
 
-  function switchHeader(nextVariant) {
+  function switchHeader(nextVariant, shouldAnimate) {
+    if (shouldAnimate === undefined) shouldAnimate = true;
+
     stopAnimations();
 
     const nextHeader = nextVariant === 'orange' ? orangeHeader : whiteHeader;
@@ -260,7 +278,7 @@
     nextHeader.style.display = 'flex';
     activeVariant = nextVariant;
 
-    animateItems(nextHeader);
+    if (shouldAnimate) animateItems(nextHeader);
   }
 
   function animateItems(header) {
