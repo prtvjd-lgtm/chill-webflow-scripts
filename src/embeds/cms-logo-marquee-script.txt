@@ -71,11 +71,21 @@
       });
 
     if (root.getAttribute('data-logo-marquee-pause-on-hover') !== 'false') {
-      root.addEventListener('mouseenter', function () {
+      track.addEventListener('mouseover', function (event) {
+        var item = event.target.closest(ITEM_SELECTOR);
+        var previousItem = event.relatedTarget && event.relatedTarget.closest && event.relatedTarget.closest(ITEM_SELECTOR);
+
+        if (!item || !track.contains(item) || item === previousItem) return;
+
         isPaused = true;
       });
 
-      root.addEventListener('mouseleave', function () {
+      track.addEventListener('mouseout', function (event) {
+        var item = event.target.closest(ITEM_SELECTOR);
+        var nextItem = event.relatedTarget && event.relatedTarget.closest && event.relatedTarget.closest(ITEM_SELECTOR);
+
+        if (!item || !track.contains(item) || item === nextItem) return;
+
         isPaused = false;
       });
     }
