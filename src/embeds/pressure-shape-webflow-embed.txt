@@ -161,7 +161,7 @@
         CONFIG.respectReducedMotion &&
         window.matchMedia &&
         window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      var video = createMaskVideo(mask);
+      var videoLayer = createMaskVideo(mask);
 
       var state = {
         activeSlideIndex: 0,
@@ -196,7 +196,7 @@
       showSlide(slides[0], hasSlides);
 
       bindCursorPressure(stage, state);
-      startMaskIntro(mask, reduceMotion, video);
+      startMaskIntro(mask, reduceMotion, videoLayer);
       requestAnimationFrame(frame);
 
       function frame(time) {
@@ -877,23 +877,24 @@
 
       if (window.getComputedStyle(mask).position === 'static') mask.style.position = 'relative';
 
+      var layer = document.createElement('div');
       var video = document.createElement('video');
 
-      video.className = 'pressure-shape-photo-layer pressure-shape-video';
+      layer.className = 'pressure-shape-photo-layer pressure-shape-video-layer';
+      video.className = 'pressure-shape-video';
       video.src = source;
       video.muted = true;
       video.defaultMuted = true;
       video.loop = true;
       video.playsInline = true;
       video.preload = 'auto';
-      video.style.opacity = '0';
-      video.style.transform = 'scale(' + CONFIG.introPhotoScale + ')';
       video.setAttribute('aria-hidden', 'true');
       video.setAttribute('tabindex', '-1');
-      mask.appendChild(video);
+      layer.appendChild(video);
+      mask.appendChild(layer);
       video.load();
 
-      return video;
+      return { element: video, layer: layer };
     }
 
     function waitForVideoFrame(video, callback) {
@@ -919,13 +920,13 @@
       }
     }
 
-    function showVideoAsPoster(mask, video, animateIntro) {
+    function showVideoAsPoster(mask, layer, animateIntro) {
       mask.style.backgroundImage = 'none';
       mask.style.backgroundColor = 'transparent';
       mask.classList.remove('is-pressure-video-error');
       mask.classList.add('is-pressure-video-ready');
-      video.style.opacity = animateIntro ? '0' : '1';
-      video.style.transform = 'scale(' + (animateIntro ? CONFIG.introPhotoScale : 1) + ')';
+      layer.style.opacity = animateIntro ? '0' : '1';
+      layer.style.transform = 'scale(' + (animateIntro ? CONFIG.introPhotoScale : 1) + ')';
       mask.style.opacity = '1';
     }
 
@@ -937,10 +938,13 @@
       }
     }
 
-    function startMaskIntro(mask, reduceMotion, video) {
+    function startMaskIntro(mask, reduceMotion, videoLayer) {
       if (mask.__pressureIntroStarted) return;
 
-      if (video) {
+      if (videoLayer) {
+        var video = videoLayer.element;
+        var layer = videoLayer.layer;
+
         mask.__pressureIntroStarted = true;
         mask.__pressureIntro = {
           active: !reduceMotion && CONFIG.introEnabled,
@@ -952,19 +956,19 @@
           if (!isReady) {
             mask.classList.add('is-pressure-video-error');
             mask.__pressureIntro.waitForMedia = false;
-            video.remove();
+            layer.remove();
             startBackgroundIntro(mask);
             return;
           }
 
           if (!CONFIG.introEnabled || reduceMotion) {
-            showVideoAsPoster(mask, video);
+            showVideoAsPoster(mask, layer);
             return;
           }
 
-          showVideoAsPoster(mask, video, true);
+          showVideoAsPoster(mask, layer, true);
           startVideoPlayback(video);
-          playPhotoIntro(video);
+          playPhotoIntro(layer);
         });
         return;
       }
