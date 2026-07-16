@@ -919,13 +919,13 @@
       }
     }
 
-    function showVideoAsPoster(mask, video) {
+    function showVideoAsPoster(mask, video, animateIntro) {
       mask.style.backgroundImage = 'none';
       mask.style.backgroundColor = 'transparent';
       mask.classList.remove('is-pressure-video-error');
       mask.classList.add('is-pressure-video-ready');
-      video.style.opacity = '1';
-      video.style.transform = 'scale(1)';
+      video.style.opacity = animateIntro ? '0' : '1';
+      video.style.transform = 'scale(' + (animateIntro ? CONFIG.introPhotoScale : 1) + ')';
       mask.style.opacity = '1';
     }
 
@@ -962,10 +962,8 @@
             return;
           }
 
-          showVideoAsPoster(mask, video);
+          showVideoAsPoster(mask, video, true);
           startVideoPlayback(video);
-          video.style.opacity = '0';
-          video.style.transform = 'scale(' + CONFIG.introPhotoScale + ')';
           playPhotoIntro(video);
         });
         return;
