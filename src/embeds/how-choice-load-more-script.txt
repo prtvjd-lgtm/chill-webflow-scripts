@@ -12,6 +12,9 @@
 
   var ROOT_SELECTOR = '.how-choice-block';
   var BUTTON_SELECTOR = '[data-how-choice-load-more]';
+  var MOBILE_VIEWPORT = window.matchMedia
+    ? window.matchMedia('(max-width: 479px)')
+    : null;
   var APPEAR_ANIMATION = {
     duration: 600,
     stagger: 70,
@@ -44,8 +47,10 @@
       loadedUrls: new Set([new URL(window.location.href).href]),
       nextPageUrl: '',
       isExpanded: false,
+      isMobile: isMobileViewport(),
       isPreloading: false,
       preloadPromise: null,
+      mobileObserver: null,
       appearanceFrame: 0,
       appearanceTimers: [],
       initialButtonDisplay: button.style.display,
@@ -58,8 +63,19 @@
     state.nextPageUrl = getNextPageUrl(root, window.location.href, state.loadedUrls);
     state.initialLabel = state.labelTextNode ? state.labelTextNode.nodeValue : '';
 
-    ensurePreloaded(state);
-    updateButton(state);
+    applyViewportMode(state);
+
+    if (MOBILE_VIEWPORT) {
+      var viewportChangeHandler = function () {
+        applyViewportMode(state);
+      };
+
+      if (MOBILE_VIEWPORT.addEventListener) {
+        MOBILE_VIEWPORT.addEventListener('change', viewportChangeHandler);
+      } else {
+        MOBILE_VIEWPORT.addListener(viewportChangeHandler);
+      }
+    }
 
     button.addEventListener('click', function (event) {
       event.preventDefault();
@@ -100,6 +116,104 @@
       return doc.querySelectorAll(ROOT_SELECTOR)[index] || null;
     }
 
+    function isMobileViewport() {
+      return MOBILE_VIEWPORT ? MOBILE_VIEWPORT.matches : window.innerWidth <= 479;
+    }
+
+    function applyViewportMode(currentState) {
+      if (isMobileViewport()) {
+        activateMobileMode(currentState);
+        return;
+      }
+
+      activateDesktopMode(currentState);
+    }
+
+    function activateMobileMode(currentState) {
+      currentState.isMobile = true;
+      updateButton(currentState);
+
+      if (currentState.hiddenItems.length) {
+        showMobileItems(currentState);
+        return;
+      }
+
+      observeMobileBlock(currentState);
+    }
+
+    function activateDesktopMode(currentState) {
+      currentState.isMobile = false;
+      stopMobileObserver(currentState);
+
+      if (currentState.isExpanded && currentState.hiddenItems.length) {
+        clearAppearanceAnimation(currentState);
+        finishHeightAnimation(currentState.root);
+        currentState.hiddenItems.forEach(hideItem);
+        currentState.isExpanded = false;
+      }
+
+      ensurePreloaded(currentState);
+      updateButton(currentState);
+    }
+
+    function observeMobileBlock(currentState) {
+      if (
+        currentState.mobileObserver ||
+        currentState.isPreloading ||
+        !currentState.nextPageUrl
+      ) {
+        return;
+      }
+
+      if (!window.IntersectionObserver) {
+        loadMobileItems(currentState);
+        return;
+      }
+
+      currentState.mobileObserver = new IntersectionObserver(function (entries) {
+        var isNearBlock = entries.some(function (entry) {
+          return entry.isIntersecting;
+        });
+
+        if (!isNearBlock) return;
+
+        stopMobileObserver(currentState);
+        loadMobileItems(currentState);
+      }, {
+        rootMargin: '0px 0px 480px 0px'
+      });
+      currentState.mobileObserver.observe(currentState.root);
+    }
+
+    function stopMobileObserver(currentState) {
+      if (!currentState.mobileObserver) return;
+
+      currentState.mobileObserver.disconnect();
+      currentState.mobileObserver = null;
+    }
+
+    function loadMobileItems(currentState) {
+      ensurePreloaded(currentState).then(function () {
+        if (
+          !currentState.isMobile ||
+          !currentState.hiddenItems.length ||
+          currentState.isExpanded
+        ) {
+          return;
+        }
+
+        showMobileItems(currentState);
+      });
+    }
+
+    function showMobileItems(currentState) {
+      clearAppearanceAnimation(currentState);
+      finishHeightAnimation(currentState.root);
+      currentState.hiddenItems.forEach(showItem);
+      currentState.isExpanded = true;
+      updateButton(currentState);
+    }
+
     function getButtonTextNode(element) {
       var nodes = element.childNodes;
 
@@ -128,6 +242,12 @@
         })
         .then(function () {
           currentState.isPreloading = false;
+
+          if (currentState.isMobile && currentState.hiddenItems.length) {
+            showMobileItems(currentState);
+            return;
+          }
+
           updateButton(currentState);
         });
 
@@ -223,8 +343,9 @@
 
     function updateButton(currentState) {
       var isVisible = Boolean(
-        currentState.hiddenItems.length ||
-        (!currentState.isPreloading && currentState.nextPageUrl)
+        !currentState.isMobile &&
+        (currentState.hiddenItems.length ||
+          (!currentState.isPreloading && currentState.nextPageUrl))
       );
 
       currentState.button.style.display = isVisible
