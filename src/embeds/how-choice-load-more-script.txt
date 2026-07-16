@@ -1,0 +1,151 @@
+<!-- Подгрузка CMS-карточек how choice -->
+<style>
+.how-choice-block .w-pagination-wrapper {
+  display: none !important;
+}
+</style>
+
+<script>
+(function () {
+  if (window.__chillHowChoiceLoadMoreStarted) return;
+  window.__chillHowChoiceLoadMoreStarted = true;
+
+  var ROOT_SELECTOR = '.how-choice-block';
+  var BUTTON_SELECTOR = '[data-how-choice-load-more]';
+
+  function initAll() {
+    Array.prototype.forEach.call(document.querySelectorAll(ROOT_SELECTOR), initBlock);
+  }
+
+  function initBlock(root, rootIndex) {
+    if (root.dataset.howChoiceLoadMoreReady === 'true') return;
+
+    var button = root.querySelector(BUTTON_SELECTOR);
+    var cmsList = getCmsList(root);
+    var itemsContainer = cmsList && cmsList.querySelector('.w-dyn-items');
+
+    if (!button || !cmsList || !itemsContainer) return;
+
+    root.dataset.howChoiceLoadMoreReady = 'true';
+
+    var loadedUrls = new Set([new URL(window.location.href).href]);
+    var nextPageUrl = getNextPageUrl(root, window.location.href, loadedUrls);
+    var initialButtonDisplay = button.style.display;
+    var initialPointerEvents = button.style.pointerEvents;
+    var isButtonElement = button.tagName === 'BUTTON';
+    var initialDisabled = isButtonElement ? button.disabled : false;
+
+    updateButtonVisibility();
+
+    button.addEventListener('click', function (event) {
+      event.preventDefault();
+
+      if (!nextPageUrl || button.dataset.howChoiceLoadMoreLoading === 'true') return;
+
+      var pageUrl = nextPageUrl;
+      loadedUrls.add(pageUrl);
+      setLoading(true);
+
+      fetch(pageUrl, { credentials: 'same-origin' })
+        .then(function (response) {
+          if (!response.ok) {
+            throw new Error('Не удалось загрузить следующую страницу CMS.');
+          }
+
+          return response.text().then(function (html) {
+            return {
+              html: html,
+              url: response.url
+            };
+          });
+        })
+        .then(function (result) {
+          var doc = new DOMParser().parseFromString(result.html, 'text/html');
+          var fetchedRoot = getMatchingRoot(doc, rootIndex);
+          var fetchedList = fetchedRoot && getCmsList(fetchedRoot);
+          var fetchedItemsContainer = fetchedList && fetchedList.querySelector('.w-dyn-items');
+
+          if (!fetchedItemsContainer) {
+            throw new Error('Не найден CMS-список на следующей странице.');
+          }
+
+          Array.prototype.forEach.call(fetchedItemsContainer.children, function (item) {
+            itemsContainer.appendChild(document.importNode(item, true));
+          });
+
+          nextPageUrl = getNextPageUrl(fetchedRoot, result.url, loadedUrls);
+          updateButtonVisibility();
+
+          document.dispatchEvent(new CustomEvent('how-choice:more-loaded', {
+            detail: {
+              root: root
+            }
+          }));
+        })
+        .catch(function (error) {
+          loadedUrls.delete(pageUrl);
+          console.warn('How choice: ', error);
+        })
+        .then(function () {
+          setLoading(false);
+        });
+    });
+
+    function getCmsList(scope) {
+      var pagination = scope.querySelector('.w-pagination-wrapper');
+
+      return (pagination && pagination.closest('.w-dyn-list')) || scope.querySelector('.w-dyn-list');
+    }
+
+    function getNextPageUrl(scope, baseUrl, seenUrls) {
+      var list = getCmsList(scope);
+      var pagination = list && list.querySelector('.w-pagination-wrapper');
+      var nextLink = pagination && pagination.querySelector('.w-pagination-next');
+
+      if (!nextLink) return '';
+
+      var href = nextLink.getAttribute('href');
+
+      if (!href || href === '#') return '';
+
+      var url = new URL(href, baseUrl).href;
+
+      return seenUrls.has(url) ? '' : url;
+    }
+
+    function getMatchingRoot(doc, index) {
+      return doc.querySelectorAll(ROOT_SELECTOR)[index] || null;
+    }
+
+    function updateButtonVisibility() {
+      var isVisible = Boolean(nextPageUrl);
+
+      button.style.display = isVisible ? initialButtonDisplay : 'none';
+      button.setAttribute('aria-hidden', isVisible ? 'false' : 'true');
+    }
+
+    function setLoading(isLoading) {
+      if (isLoading) {
+        button.dataset.howChoiceLoadMoreLoading = 'true';
+        button.style.pointerEvents = 'none';
+        button.setAttribute('aria-busy', 'true');
+
+        if (isButtonElement) button.disabled = true;
+        return;
+      }
+
+      delete button.dataset.howChoiceLoadMoreLoading;
+      button.style.pointerEvents = initialPointerEvents;
+      button.removeAttribute('aria-busy');
+
+      if (isButtonElement) button.disabled = initialDisabled;
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAll, { once: true });
+  } else {
+    initAll();
+  }
+})();
+</script>
