@@ -49,6 +49,7 @@
 
   const ACTIVE_DOT_CLASS = 'is-active';
   const DISABLED_CLASS = 'is-disabled';
+  const LOOP_DISABLED_CLASS = 'is-loop-disabled';
   const LOOP_CLONE_ATTRIBUTE = 'data-cms-slider-loop-clone';
   const LOOP_RESET_DELAY = 500;
   const INTERACTIVE_SELECTOR = [
@@ -156,7 +157,7 @@
     function syncLoopClones() {
       const visibleCount = getVisibleCount();
       const nextCloneCount = Math.min(visibleCount, items.length);
-      const shouldLoop = !nextPageUrl && items.length > visibleCount;
+      const shouldLoop = !root.classList.contains(LOOP_DISABLED_CLASS) && !nextPageUrl && items.length > visibleCount;
 
       if (!shouldLoop) {
         if (!loopCloneCount) return;
@@ -293,6 +294,12 @@
     }
 
     function updateButtons() {
+      if (root.classList.contains(LOOP_DISABLED_CLASS)) {
+        setDisabled(prevButton, isLoading || currentIndex <= 0);
+        setDisabled(nextButton, isLoading || (!nextPageUrl && currentIndex >= getMaxIndex()));
+        return;
+      }
+
       const canNavigate = Boolean(nextPageUrl) || items.length > getVisibleCount();
 
       setDisabled(prevButton, isLoading || !canNavigate);
@@ -419,7 +426,7 @@
     async function goTo(targetIndex) {
       if (isLoading || loopResetTimer || !Number.isFinite(targetIndex)) return;
 
-      if (!loopCloneCount && targetIndex < 0) {
+      if (!root.classList.contains(LOOP_DISABLED_CLASS) && !loopCloneCount && targetIndex < 0) {
         await loadAllPages();
       }
 

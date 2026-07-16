@@ -86,6 +86,7 @@
   const VIDEO_READY_CLASS = 'is-video-ready';
   const HAS_VIDEO_CLASS = 'has-video';
   const VIDEO_ERROR_CLASS = 'is-video-error';
+  const LOOP_DISABLED_CLASS = 'is-loop-disabled';
   const MOBILE_BREAKPOINT = 991;
   const SWIPE_DISTANCE = 40;
   const AUTO_PLAY_INTERVAL = 4000;
@@ -211,6 +212,10 @@
 
     if (!studioStates.length) return;
 
+    function isLoopDisabled() {
+      return root.classList.contains(LOOP_DISABLED_CLASS);
+    }
+
     function getDots() {
       return pagination ? Array.from(pagination.querySelectorAll(DOT_SELECTOR)) : [];
     }
@@ -255,6 +260,7 @@
       return Boolean(
         activeState &&
         activeState.slides.length > 1 &&
+        (!isLoopDisabled() || activeState.index < activeState.slides.length - 1) &&
         rootIsVisible &&
         !document.hidden &&
         !(reducedMotion && reducedMotion.matches)
@@ -276,7 +282,7 @@
         autoplayTimer = null;
         if (!shouldAutoplay()) return;
 
-        goToSlide((activeState.index + 1) % activeState.slides.length, false);
+        goToSlide(isLoopDisabled() ? activeState.index + 1 : (activeState.index + 1) % activeState.slides.length, false);
         scheduleAutoplay();
       }, AUTO_PLAY_INTERVAL);
     }
@@ -285,7 +291,9 @@
       if (!activeState) return;
 
       const slideCount = activeState.slides.length;
-      const nextIndex = ((targetIndex % slideCount) + slideCount) % slideCount;
+      const nextIndex = isLoopDisabled()
+        ? Math.max(0, Math.min(targetIndex, slideCount - 1))
+        : ((targetIndex % slideCount) + slideCount) % slideCount;
 
       if (nextIndex === activeState.index) return;
 
