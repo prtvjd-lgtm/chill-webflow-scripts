@@ -22,7 +22,10 @@
   var TRACK_SELECTOR = '[data-logo-marquee="track"]';
   var ITEM_SELECTOR = '[data-logo-marquee="item"]';
   var PAGINATION_SELECTOR = '[data-logo-marquee="pagination"]';
+  var PREV_SELECTOR = '[data-logo-marquee="prev"], [data-cms-slider="prev"]';
+  var NEXT_SELECTOR = '[data-logo-marquee="next"], [data-cms-slider="next"]';
   var CLONE_ATTRIBUTE = 'data-logo-marquee-clone';
+  var MANUAL_TRANSITION = 'transform 450ms cubic-bezier(0.215, 0.61, 0.355, 1)';
 
   function initAll() {
     Array.prototype.forEach.call(document.querySelectorAll(ROOT_SELECTOR), initMarquee);
@@ -33,6 +36,8 @@
 
     var track = root.querySelector(TRACK_SELECTOR);
     var pagination = root.querySelector(PAGINATION_SELECTOR);
+    var prevButtons = root.querySelectorAll(PREV_SELECTOR);
+    var nextButtons = root.querySelectorAll(NEXT_SELECTOR);
 
     if (!track) return;
 
@@ -41,10 +46,12 @@
     var loadedUrls = new Set([new URL(window.location.href).href]);
     var animationFrame = 0;
     var resizeTimer = 0;
+    var manualAnimationTimer = 0;
     var lastTimestamp = 0;
     var offset = 0;
     var canAnimate = false;
     var isPaused = false;
+    var isManualAnimating = false;
     var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     var speed = getSpeed();
 
@@ -72,6 +79,20 @@
         isPaused = false;
       });
     }
+
+    Array.prototype.forEach.call(prevButtons, function (button) {
+      button.addEventListener('click', function (event) {
+        event.preventDefault();
+        goPrevious();
+      });
+    });
+
+    Array.prototype.forEach.call(nextButtons, function (button) {
+      button.addEventListener('click', function (event) {
+        event.preventDefault();
+        goNext();
+      });
+    });
 
     window.addEventListener('resize', function () {
       window.clearTimeout(resizeTimer);
@@ -239,6 +260,7 @@
     }
 
     function buildLoop() {
+      cancelManualAnimation();
       removeClones();
       stopAnimation();
 
@@ -304,6 +326,66 @@
       }
     }
 
+    function goNext() {
+      if (!canAnimate || isManualAnimating) return;
+
+      var firstItem = getTrackItems()[0];
+      var step = getItemStep(firstItem);
+
+      if (step <= 0) return;
+
+      animateTo(offset + step, function () {
+        recyclePassedItems();
+      });
+    }
+
+    function goPrevious() {
+      if (!canAnimate || isManualAnimating) return;
+
+      var items = getTrackItems();
+      var firstItem = items[0];
+      var lastItem = items[items.length - 1];
+      var step = getItemStep(lastItem);
+
+      if (!firstItem || !lastItem || step <= 0) return;
+
+      track.insertBefore(lastItem, firstItem);
+      offset += step;
+
+      animateTo(offset - step);
+    }
+
+    function animateTo(targetOffset, afterAnimation) {
+      stopAnimation();
+      isManualAnimating = true;
+      track.style.transition = 'none';
+      render();
+      track.getBoundingClientRect();
+
+      function finish() {
+        window.clearTimeout(manualAnimationTimer);
+        manualAnimationTimer = 0;
+        track.style.transition = 'none';
+
+        if (afterAnimation) afterAnimation();
+
+        render();
+        isManualAnimating = false;
+        startAnimation();
+      }
+
+      offset = targetOffset;
+
+      if (reducedMotion) {
+        finish();
+        return;
+      }
+
+      track.style.transition = MANUAL_TRANSITION;
+      render();
+      manualAnimationTimer = window.setTimeout(finish, 470);
+    }
+
     function startAnimation() {
       if (reducedMotion || !canAnimate || animationFrame) return;
 
@@ -330,6 +412,16 @@
 
       window.cancelAnimationFrame(animationFrame);
       animationFrame = 0;
+    }
+
+    function cancelManualAnimation() {
+      window.clearTimeout(manualAnimationTimer);
+      manualAnimationTimer = 0;
+
+      if (!isManualAnimating) return;
+
+      track.style.transition = 'none';
+      isManualAnimating = false;
     }
   }
 
