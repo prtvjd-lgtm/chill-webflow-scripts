@@ -21,6 +21,13 @@
     will-change: transform, opacity;
   }
 
+  .pressure-shape-video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
   .pressure-shape-slide {
     position: absolute;
     inset: 0;
@@ -154,6 +161,7 @@
         CONFIG.respectReducedMotion &&
         window.matchMedia &&
         window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var video = createMaskVideo(mask);
 
       var state = {
         activeSlideIndex: 0,
@@ -188,7 +196,7 @@
       showSlide(slides[0], hasSlides);
 
       bindCursorPressure(stage, state);
-      startMaskIntro(mask, reduceMotion);
+      startMaskIntro(mask, reduceMotion, video);
       requestAnimationFrame(frame);
 
       function frame(time) {
@@ -420,8 +428,13 @@
       if (
         !reduceMotion &&
         intro &&
-        intro.startedAt !== null &&
-        time < intro.startedAt + CONFIG.introScaleDuration * CONFIG.initialRevealProgress
+        (
+          (intro.waitForMedia && intro.startedAt === null) ||
+          (
+            intro.startedAt !== null &&
+            time < intro.startedAt + CONFIG.introScaleDuration * CONFIG.initialRevealProgress
+          )
+        )
       ) {
         return;
       }
@@ -834,8 +847,128 @@
       return role === 'chill' || role === 'and';
     }
 
-    function startMaskIntro(mask, reduceMotion) {
+    function getSafeVideoUrl(value) {
+      if (!value) return '';
+
+      try {
+        var url = new URL(value, window.location.origin);
+        var host = url.hostname.toLowerCase();
+        var isYandexStorage = host === 'storage.yandexcloud.net' || host.endsWith('.storage.yandexcloud.net');
+
+        if (url.protocol !== 'https:' || !isYandexStorage || !url.pathname.toLowerCase().endsWith('.mp4')) {
+          return '';
+        }
+
+        return url.href;
+      } catch (error) {
+        return '';
+      }
+    }
+
+    function createMaskVideo(mask) {
+      var source = getSafeVideoUrl(mask.getAttribute('data-pressure-video-url'));
+
+      if (!source) {
+        if (mask.getAttribute('data-pressure-video-url')) {
+          mask.classList.add('is-pressure-video-error');
+        }
+        return null;
+      }
+
+      var video = document.createElement('video');
+
+      video.className = 'pressure-shape-photo-layer pressure-shape-video';
+      video.src = source;
+      video.muted = true;
+      video.defaultMuted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.preload = 'auto';
+      video.style.opacity = '0';
+      video.style.transform = 'scale(' + CONFIG.introPhotoScale + ')';
+      video.setAttribute('aria-hidden', 'true');
+      video.setAttribute('tabindex', '-1');
+      mask.appendChild(video);
+      video.load();
+
+      return video;
+    }
+
+    function waitForVideoFrame(video, callback) {
+      var completed = false;
+
+      function done(isReady) {
+        if (completed) return;
+
+        completed = true;
+        callback(isReady);
+      }
+
+      video.addEventListener('loadeddata', function () {
+        done(true);
+      }, { once: true });
+
+      video.addEventListener('error', function () {
+        done(false);
+      }, { once: true });
+
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        done(true);
+      }
+    }
+
+    function showVideoAsPoster(mask, video) {
+      mask.style.backgroundImage = 'none';
+      mask.style.backgroundColor = 'transparent';
+      mask.classList.remove('is-pressure-video-error');
+      mask.classList.add('is-pressure-video-ready');
+      video.style.opacity = '1';
+      video.style.transform = 'scale(1)';
+      mask.style.opacity = '1';
+    }
+
+    function startVideoPlayback(video) {
+      var playPromise = video.play();
+
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(function () {});
+      }
+    }
+
+    function startMaskIntro(mask, reduceMotion, video) {
       if (mask.__pressureIntroStarted) return;
+
+      if (video) {
+        mask.__pressureIntroStarted = true;
+        mask.__pressureIntro = {
+          active: !reduceMotion && CONFIG.introEnabled,
+          startedAt: null,
+          waitForMedia: true
+        };
+
+        waitForVideoFrame(video, function (isReady) {
+          if (!isReady) {
+            mask.classList.add('is-pressure-video-error');
+            mask.__pressureIntro.waitForMedia = false;
+            video.remove();
+            startBackgroundIntro(mask);
+            return;
+          }
+
+          if (!CONFIG.introEnabled || reduceMotion) {
+            showVideoAsPoster(mask, video);
+            return;
+          }
+
+          showVideoAsPoster(mask, video);
+          video.style.opacity = '0';
+          video.style.transform = 'scale(' + CONFIG.introPhotoScale + ')';
+          playPhotoIntro(video, function () {
+            startVideoPlayback(video);
+          });
+        });
+        return;
+      }
 
       if (!CONFIG.introEnabled || reduceMotion) {
         mask.style.opacity = '1';
@@ -845,8 +978,13 @@
       mask.__pressureIntroStarted = true;
       mask.__pressureIntro = {
         active: true,
-        startedAt: null
+        startedAt: null,
+        waitForMedia: false
       };
+      startBackgroundIntro(mask);
+    }
+
+    function startBackgroundIntro(mask) {
       var background = getBackgroundStyles(mask);
 
       mask.style.backgroundImage = 'none';
@@ -944,7 +1082,7 @@
       target.style.backgroundColor = source.color;
     }
 
-    function playPhotoIntro(photo) {
+    function playPhotoIntro(photo, onComplete) {
       var startedAt = null;
 
       function frame(time) {
@@ -965,6 +1103,7 @@
 
         photo.style.opacity = '1';
         photo.style.transform = 'scale(1)';
+        if (typeof onComplete === 'function') onComplete();
       }
 
       requestAnimationFrame(frame);
