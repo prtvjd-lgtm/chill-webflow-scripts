@@ -1,0 +1,86 @@
+<!-- CMS plain text paragraphs -->
+<style>
+[data-cms-paragraphs] > [data-cms-paragraph] {
+  margin: 0 !important;
+  white-space: pre-line;
+}
+
+[data-cms-paragraphs] > [data-cms-paragraph] + [data-cms-paragraph] {
+  margin-top: 16px !important;
+}
+</style>
+
+<script>
+(function () {
+  if (window.__chillCmsPlainTextParagraphsStarted) return;
+  window.__chillCmsPlainTextParagraphsStarted = true;
+
+  var ROOT_SELECTOR = '[data-cms-paragraphs]';
+  var PARAGRAPH_ATTRIBUTE = 'data-cms-paragraph';
+
+  function hasPreparedParagraphs(root) {
+    return Array.prototype.some.call(root.children, function (child) {
+      return child.hasAttribute(PARAGRAPH_ATTRIBUTE);
+    });
+  }
+
+  function splitParagraphs(text) {
+    return String(text || '')
+      .replace(/\r\n?/g, '\n')
+      .split(/\n[ \t\u00a0]*\n+/)
+      .map(function (paragraph) {
+        return paragraph.trim();
+      })
+      .filter(Boolean);
+  }
+
+  function prepareRoot(root) {
+    if (root.__chillCmsParagraphsProcessed || hasPreparedParagraphs(root)) return;
+
+    var paragraphs = splitParagraphs(root.textContent);
+    if (paragraphs.length < 2) return;
+
+    root.replaceChildren();
+
+    paragraphs.forEach(function (text) {
+      var paragraph = document.createElement('p');
+      paragraph.setAttribute(PARAGRAPH_ATTRIBUTE, 'true');
+      paragraph.textContent = text;
+      root.appendChild(paragraph);
+    });
+
+    root.__chillCmsParagraphsProcessed = true;
+  }
+
+  function prepareIn(scope) {
+    if (scope.nodeType !== Node.ELEMENT_NODE) return;
+
+    if (scope.matches(ROOT_SELECTOR)) prepareRoot(scope);
+
+    Array.prototype.forEach.call(scope.querySelectorAll(ROOT_SELECTOR), prepareRoot);
+  }
+
+  function observeNewRoots() {
+    if (!document.body || !window.MutationObserver) return;
+
+    var observer = new MutationObserver(function (records) {
+      records.forEach(function (record) {
+        Array.prototype.forEach.call(record.addedNodes, prepareIn);
+      });
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function init() {
+    prepareIn(document.documentElement);
+    observeNewRoots();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
+})();
+</script>
