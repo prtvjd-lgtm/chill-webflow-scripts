@@ -243,6 +243,8 @@
         .then(function () {
           currentState.isPreloading = false;
 
+          notifyItemsLoaded(currentState);
+
           if (currentState.isMobile && currentState.hiddenItems.length) {
             showMobileItems(currentState);
             return;
@@ -252,6 +254,16 @@
         });
 
       return currentState.preloadPromise;
+    }
+
+    function notifyItemsLoaded(currentState) {
+      if (!currentState.hiddenItems.length) return;
+
+      document.dispatchEvent(new CustomEvent('how-choice:more-loaded', {
+        detail: {
+          root: currentState.root
+        }
+      }));
     }
 
     function preloadRemainingPages(currentState) {
@@ -320,12 +332,6 @@
           animateElementHeight(currentState.root, function () {
             revealItems(currentState);
           });
-
-          document.dispatchEvent(new CustomEvent('how-choice:more-loaded', {
-            detail: {
-              root: currentState.root
-            }
-          }));
         })
         .then(function () {
           setLoading(currentState, false);

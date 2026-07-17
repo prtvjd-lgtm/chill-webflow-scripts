@@ -354,6 +354,7 @@
 
   function init() {
     updatePracticeLinks();
+    document.addEventListener('how-choice:more-loaded', updatePracticeLinks);
     setupPracticePagePrefetch();
     openPracticeFromQuery();
   }
