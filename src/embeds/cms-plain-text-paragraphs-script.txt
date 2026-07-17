@@ -33,12 +33,16 @@
       .filter(Boolean);
   }
 
+  function hasLineBreak(text) {
+    return /\r\n?|\n/.test(String(text || ''));
+  }
+
   function isPlainTextElement(element) {
     if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
     if (SKIPPED_TAGS.has(element.tagName) || element.classList.contains(PARAGRAPH_CLASS)) return false;
     if (element.children.length || element.closest('[contenteditable="true"]')) return false;
 
-    return splitParagraphs(element.textContent).length > 1;
+    return hasLineBreak(element.textContent);
   }
 
   function prepareElement(element) {
