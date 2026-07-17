@@ -16,6 +16,7 @@
     card: '[data-practice-duration-card]',
     tab: '[data-practice-duration-tab]',
     panel: '[data-practice-duration-panel]',
+    button: '[data-practice-duration-button]',
     text: '[data-practice-duration-text]',
     readMore: '[data-practice-duration-read-more]',
     readMoreLabel: '[data-practice-duration-read-more-label]'
@@ -257,8 +258,8 @@
     setReadMoreVisibility(state, shouldShowReadMore(state));
   }
 
-  function getContentContainer(card, panels, readMore) {
-    const elements = panels.concat(readMore);
+  function getContentContainer(card, panels, readMore, durationButtons) {
+    const elements = panels.concat(readMore, durationButtons);
 
     if (!elements.length) return null;
 
@@ -359,6 +360,14 @@
         collapseText(panel.querySelector(SELECTORS.text));
       });
 
+      state.buttons.forEach(function (button) {
+        const isActive =
+          getDuration(button, 'data-practice-duration-button') === nextDuration;
+
+        setElementVisibility(button, isActive);
+        button.classList.toggle(ACTIVE_CLASS, isActive);
+      });
+
       if (shouldAnimate) {
         animateActiveContent(state);
       } else {
@@ -426,6 +435,7 @@
     const state = {
       tabs: getOwnedElements(card, SELECTORS.tab),
       panels: getOwnedElements(card, SELECTORS.panel),
+      buttons: getOwnedElements(card, SELECTORS.button),
       readMore: getOwnedElements(card, SELECTORS.readMore),
       activeDuration: '',
       isExpanded: false,
@@ -434,7 +444,7 @@
       appearanceElements: []
     };
 
-    state.contentContainer = getContentContainer(card, state.panels, state.readMore);
+    state.contentContainer = getContentContainer(card, state.panels, state.readMore, state.buttons);
 
     state.tabs.forEach(function (tab) {
       tab.__practiceDurationCmsVisible = isVisibleByCms(tab);
@@ -463,6 +473,10 @@
       panel.setAttribute('role', 'tabpanel');
 
       if (tab) tab.setAttribute('aria-controls', panelId);
+    });
+
+    state.buttons.forEach(function (button) {
+      getBaseDisplay(button);
     });
 
     state.readMore.forEach(function (button) {
