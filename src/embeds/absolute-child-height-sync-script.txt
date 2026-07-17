@@ -15,6 +15,23 @@
     return Math.max(0, child.offsetTop + child.offsetHeight);
   }
 
+  function getAutoHeight(parent) {
+    var height = parent.style.height;
+    var transition = parent.style.transition;
+    var overflow = parent.style.overflow;
+
+    parent.style.transition = 'none';
+    parent.style.height = 'auto';
+
+    var autoHeight = parent.getBoundingClientRect().height;
+
+    parent.style.height = height;
+    parent.style.transition = transition;
+    parent.style.overflow = overflow;
+
+    return autoHeight;
+  }
+
   function prefersReducedMotion() {
     return !!(
       window.matchMedia &&
@@ -108,12 +125,27 @@
     parent.addEventListener('transitionend', finishAnimation);
   }
 
-  function syncHeight(parent, child) {
-    var targetHeight = getTargetHeight(child);
+  function syncHeight(parent, child, refreshMinimumHeight, animate) {
     var state = parent.__chillAbsoluteHeightSyncState;
 
     if (!state) {
-      parent.__chillAbsoluteHeightSyncState = { initialized: true };
+      state = { initialized: false, minimumHeight: 0 };
+      parent.__chillAbsoluteHeightSyncState = state;
+    }
+
+    if (refreshMinimumHeight) {
+      state.minimumHeight = getAutoHeight(parent);
+    }
+
+    var targetHeight = Math.max(getTargetHeight(child), state.minimumHeight);
+
+    if (!state.initialized) {
+      state.initialized = true;
+      setHeightImmediately(parent, targetHeight);
+      return;
+    }
+
+    if (animate === false) {
       setHeightImmediately(parent, targetHeight);
       return;
     }
@@ -131,27 +163,43 @@
     parent.dataset.absoluteHeightReady = 'true';
 
     var frame = 0;
-    var scheduleSync = function () {
+    var shouldRefreshMinimumHeight = false;
+    var shouldSkipAnimation = false;
+    var scheduleSync = function (refreshMinimumHeight, animate) {
+      shouldRefreshMinimumHeight = shouldRefreshMinimumHeight || !!refreshMinimumHeight;
+      shouldSkipAnimation = shouldSkipAnimation || animate === false;
+
       if (frame) return;
 
       frame = window.requestAnimationFrame(function () {
         frame = 0;
-        syncHeight(parent, child);
+        var refresh = shouldRefreshMinimumHeight;
+        var shouldAnimate = !shouldSkipAnimation;
+
+        shouldRefreshMinimumHeight = false;
+        shouldSkipAnimation = false;
+        syncHeight(parent, child, refresh, shouldAnimate);
       });
     };
 
     if (window.ResizeObserver) {
-      var resizeObserver = new ResizeObserver(scheduleSync);
+      var resizeObserver = new ResizeObserver(function () {
+        scheduleSync(false, true);
+      });
       resizeObserver.observe(child);
     }
 
-    window.addEventListener('resize', scheduleSync, { passive: true });
+    window.addEventListener('resize', function () {
+      scheduleSync(true, false);
+    }, { passive: true });
 
     if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(scheduleSync);
+      document.fonts.ready.then(function () {
+        scheduleSync(true, false);
+      });
     }
 
-    scheduleSync();
+    scheduleSync(true, false);
   }
 
   function initIn(scope) {
