@@ -1,12 +1,15 @@
-<!-- CMS plain text paragraphs -->
+<!-- Plain text paragraphs -->
 <style>
-[data-cms-paragraphs] > [data-cms-paragraph] {
+.chill-plain-text-paragraph {
+  display: block;
   margin: 0 !important;
   white-space: pre-line;
 }
 
-[data-cms-paragraphs] > [data-cms-paragraph] + [data-cms-paragraph] {
-  margin-top: 16px !important;
+@supports (margin-top: 1lh) {
+  .chill-plain-text-paragraph + .chill-plain-text-paragraph {
+    margin-top: 0.64lh !important;
+  }
 }
 </style>
 
@@ -15,14 +18,10 @@
   if (window.__chillCmsPlainTextParagraphsStarted) return;
   window.__chillCmsPlainTextParagraphsStarted = true;
 
-  var ROOT_SELECTOR = '[data-cms-paragraphs]';
-  var PARAGRAPH_ATTRIBUTE = 'data-cms-paragraph';
-
-  function hasPreparedParagraphs(root) {
-    return Array.prototype.some.call(root.children, function (child) {
-      return child.hasAttribute(PARAGRAPH_ATTRIBUTE);
-    });
-  }
+  var PARAGRAPH_CLASS = 'chill-plain-text-paragraph';
+  var PARAGRAPH_SELECTOR = '.' + PARAGRAPH_CLASS;
+  var SKIPPED_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'TEXTAREA', 'OPTION']);
+  var supportsLineHeightUnit = !!(window.CSS && window.CSS.supports && window.CSS.supports('margin-top', '1lh'));
 
   function splitParagraphs(text) {
     return String(text || '')
@@ -34,30 +33,62 @@
       .filter(Boolean);
   }
 
-  function prepareRoot(root) {
-    if (root.__chillCmsParagraphsProcessed || hasPreparedParagraphs(root)) return;
+  function isPlainTextElement(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE) return false;
+    if (SKIPPED_TAGS.has(element.tagName) || element.classList.contains(PARAGRAPH_CLASS)) return false;
+    if (element.children.length || element.closest('[contenteditable="true"]')) return false;
 
-    var paragraphs = splitParagraphs(root.textContent);
-    if (paragraphs.length < 2) return;
+    return splitParagraphs(element.textContent).length > 1;
+  }
 
-    root.replaceChildren();
+  function prepareElement(element) {
+    if (!isPlainTextElement(element)) return;
+
+    var paragraphs = splitParagraphs(element.textContent);
+    var fragment = document.createDocumentFragment();
 
     paragraphs.forEach(function (text) {
-      var paragraph = document.createElement('p');
-      paragraph.setAttribute(PARAGRAPH_ATTRIBUTE, 'true');
+      var paragraph = document.createElement('span');
+      paragraph.className = PARAGRAPH_CLASS;
       paragraph.textContent = text;
-      root.appendChild(paragraph);
+      fragment.appendChild(paragraph);
     });
 
-    root.__chillCmsParagraphsProcessed = true;
+    element.replaceChildren(fragment);
+    setFallbackMargins(element);
+  }
+
+  function getLineHeight(element) {
+    var styles = window.getComputedStyle(element);
+    var lineHeight = parseFloat(styles.lineHeight);
+
+    if (Number.isFinite(lineHeight)) return lineHeight;
+
+    return parseFloat(styles.fontSize) * 1.2;
+  }
+
+  function setFallbackMargins(scope) {
+    if (supportsLineHeightUnit) return;
+
+    var paragraphs = scope.querySelectorAll(PARAGRAPH_SELECTOR);
+
+    Array.prototype.forEach.call(paragraphs, function (paragraph, index) {
+      if (index === 0) return;
+
+      paragraph.style.setProperty('margin-top', (getLineHeight(paragraph) * 0.64) + 'px', 'important');
+    });
   }
 
   function prepareIn(scope) {
-    if (scope.nodeType !== Node.ELEMENT_NODE) return;
+    if (!scope || scope.nodeType !== Node.ELEMENT_NODE) return;
 
-    if (scope.matches(ROOT_SELECTOR)) prepareRoot(scope);
+    prepareElement(scope);
+    Array.prototype.forEach.call(scope.querySelectorAll('*'), prepareElement);
+    setFallbackMargins(scope);
+  }
 
-    Array.prototype.forEach.call(scope.querySelectorAll(ROOT_SELECTOR), prepareRoot);
+  function updateFallbackMargins() {
+    if (!supportsLineHeightUnit) setFallbackMargins(document.documentElement);
   }
 
   function observeNewRoots() {
@@ -75,6 +106,11 @@
   function init() {
     prepareIn(document.documentElement);
     observeNewRoots();
+
+    if (!supportsLineHeightUnit) {
+      window.addEventListener('resize', updateFallbackMargins, { passive: true });
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(updateFallbackMargins);
+    }
   }
 
   if (document.readyState === 'loading') {
