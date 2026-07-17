@@ -20,12 +20,14 @@
 
   var PARAGRAPH_CLASS = 'chill-plain-text-paragraph';
   var PARAGRAPH_SELECTOR = '.' + PARAGRAPH_CLASS;
+  var PARAGRAPH_MARKER_PATTERN = /^[ \t]*\/{3}[ \t]*$/gm;
   var SKIPPED_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'TEXTAREA', 'OPTION']);
   var supportsLineHeightUnit = !!(window.CSS && window.CSS.supports && window.CSS.supports('margin-top', '1lh'));
 
   function splitParagraphs(text) {
     return String(text || '')
       .replace(/\r\n?/g, '\n')
+      .replace(PARAGRAPH_MARKER_PATTERN, '')
       .split(/\n[ \t\u00a0]*\n+/)
       .map(function (paragraph) {
         return paragraph.trim();
