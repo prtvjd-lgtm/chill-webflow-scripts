@@ -1,0 +1,84 @@
+<!-- Absolute child height sync -->
+<script>
+(function () {
+  if (window.__chillAbsoluteChildHeightSyncStarted) return;
+  window.__chillAbsoluteChildHeightSyncStarted = true;
+
+  var PARENT_SELECTOR = '[data-absolute-height-parent]';
+  var CHILD_SELECTOR = '[data-absolute-height-child]';
+
+  function syncHeight(parent, child) {
+    var height = Math.max(0, child.offsetTop + child.offsetHeight);
+
+    parent.style.height = height + 'px';
+  }
+
+  function initParent(parent) {
+    if (parent.dataset.absoluteHeightReady === 'true') return;
+
+    var child = parent.querySelector(CHILD_SELECTOR);
+
+    if (!child) return;
+
+    parent.dataset.absoluteHeightReady = 'true';
+
+    var frame = 0;
+    var scheduleSync = function () {
+      if (frame) return;
+
+      frame = window.requestAnimationFrame(function () {
+        frame = 0;
+        syncHeight(parent, child);
+      });
+    };
+
+    if (window.ResizeObserver) {
+      var resizeObserver = new ResizeObserver(scheduleSync);
+      resizeObserver.observe(child);
+    }
+
+    window.addEventListener('resize', scheduleSync, { passive: true });
+
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(scheduleSync);
+    }
+
+    scheduleSync();
+  }
+
+  function initIn(scope) {
+    if (!scope || scope.nodeType !== Node.ELEMENT_NODE) return;
+
+    var closestParent = scope.closest(PARENT_SELECTOR);
+
+    if (closestParent) initParent(closestParent);
+
+    if (scope.matches(PARENT_SELECTOR)) initParent(scope);
+
+    Array.prototype.forEach.call(scope.querySelectorAll(PARENT_SELECTOR), initParent);
+  }
+
+  function observeNewParents() {
+    if (!document.body || !window.MutationObserver) return;
+
+    var observer = new MutationObserver(function (records) {
+      records.forEach(function (record) {
+        Array.prototype.forEach.call(record.addedNodes, initIn);
+      });
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function init() {
+    initIn(document.documentElement);
+    observeNewParents();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
+})();
+</script>
