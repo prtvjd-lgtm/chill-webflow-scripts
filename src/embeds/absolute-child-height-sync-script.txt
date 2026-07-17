@@ -6,11 +6,119 @@
 
   var PARENT_SELECTOR = '[data-absolute-height-parent]';
   var CHILD_SELECTOR = '[data-absolute-height-child]';
+  var HEIGHT_ANIMATION = {
+    duration: 600,
+    easing: 'cubic-bezier(0.075, 0.82, 0.165, 1)'
+  };
+
+  function getTargetHeight(child) {
+    return Math.max(0, child.offsetTop + child.offsetHeight);
+  }
+
+  function prefersReducedMotion() {
+    return !!(
+      window.matchMedia &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    );
+  }
+
+  function clearHeightAnimation(parent, restoreStyles) {
+    var animation = parent.__chillAbsoluteHeightAnimation;
+
+    if (!animation) return null;
+
+    window.clearTimeout(animation.timer);
+    parent.removeEventListener('transitionend', animation.onEnd);
+
+    if (restoreStyles) {
+      parent.style.transition = animation.transition;
+      parent.style.overflow = animation.overflow;
+    }
+
+    parent.__chillAbsoluteHeightAnimation = null;
+
+    return animation;
+  }
+
+  function setHeightImmediately(parent, height) {
+    clearHeightAnimation(parent, true);
+    parent.style.height = height + 'px';
+  }
+
+  function animateHeight(parent, targetHeight) {
+    if (prefersReducedMotion()) {
+      setHeightImmediately(parent, targetHeight);
+      return;
+    }
+
+    var activeAnimation = parent.__chillAbsoluteHeightAnimation;
+
+    if (
+      activeAnimation &&
+      Math.abs(activeAnimation.targetHeight - targetHeight) < 0.5
+    ) {
+      return;
+    }
+
+    var startHeight = parent.getBoundingClientRect().height;
+    var transition = activeAnimation ? activeAnimation.transition : parent.style.transition;
+    var overflow = activeAnimation ? activeAnimation.overflow : parent.style.overflow;
+
+    clearHeightAnimation(parent, false);
+
+    if (Math.abs(startHeight - targetHeight) < 0.5) {
+      parent.style.height = targetHeight + 'px';
+      parent.style.transition = transition;
+      parent.style.overflow = overflow;
+      return;
+    }
+
+    parent.style.transition = 'none';
+    parent.style.height = startHeight + 'px';
+    parent.style.overflow = 'hidden';
+
+    parent.getBoundingClientRect();
+    parent.style.transition =
+      'height ' + HEIGHT_ANIMATION.duration + 'ms ' + HEIGHT_ANIMATION.easing;
+    parent.style.height = targetHeight + 'px';
+
+    var animation = {
+      targetHeight: targetHeight,
+      transition: transition,
+      overflow: overflow,
+      timer: 0,
+      onEnd: null
+    };
+
+    function finishAnimation(event) {
+      if (event && (event.target !== parent || event.propertyName !== 'height')) return;
+      if (parent.__chillAbsoluteHeightAnimation !== animation) return;
+
+      clearHeightAnimation(parent, false);
+      parent.style.transition = transition;
+      parent.style.overflow = overflow;
+    }
+
+    animation.onEnd = finishAnimation;
+    animation.timer = window.setTimeout(
+      finishAnimation,
+      HEIGHT_ANIMATION.duration + 80
+    );
+    parent.__chillAbsoluteHeightAnimation = animation;
+    parent.addEventListener('transitionend', finishAnimation);
+  }
 
   function syncHeight(parent, child) {
-    var height = Math.max(0, child.offsetTop + child.offsetHeight);
+    var targetHeight = getTargetHeight(child);
+    var state = parent.__chillAbsoluteHeightSyncState;
 
-    parent.style.height = height + 'px';
+    if (!state) {
+      parent.__chillAbsoluteHeightSyncState = { initialized: true };
+      setHeightImmediately(parent, targetHeight);
+      return;
+    }
+
+    animateHeight(parent, targetHeight);
   }
 
   function initParent(parent) {
