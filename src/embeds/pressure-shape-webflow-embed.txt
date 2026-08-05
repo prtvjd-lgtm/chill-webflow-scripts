@@ -798,13 +798,14 @@
 
     function getResponsiveAnchor(el, index, total, layout, preserveShapeProfile) {
       var role = el.dataset.pressureRole || el.dataset.role || '';
-      var anchorRole = !preserveShapeProfile ? getCompactAnchorRole(role, layout) : role;
+      var useHealSlot = !preserveShapeProfile && shouldUseHealSlot(el, layout);
+      var anchorRole = useHealSlot ? 'heal' : role;
       var defaults = ITEM_DEFAULTS[anchorRole] || getAutoAnchor(index, total);
 
       if (layout && layout.mobileLabelsLocked && !preserveShapeProfile) {
-        if (anchorRole === 'chill') return { x: 50, y: 20 };
-        if (anchorRole === 'heal') return getHealAnchor(layout);
-        if (anchorRole === 'and') return { x: 71, y: 72 };
+        if (role === 'chill') return { x: 50, y: 20 };
+        if (useHealSlot) return getHealAnchor(layout);
+        if (role === 'and') return { x: 71, y: 72 };
       }
 
       if (layout && layout.placement === 'vertical') {
@@ -835,13 +836,22 @@
       return { x: ITEM_DEFAULTS.heal.x, y: ITEM_DEFAULTS.heal.y };
     }
 
-    function getCompactAnchorRole(role, layout) {
-      if (!layout || window.innerWidth > CONFIG.tabletMaxWidth) return role;
+    function shouldUseHealSlot(el, layout) {
+      if (!layout || window.innerWidth > CONFIG.tabletMaxWidth) return false;
 
-      if (role === 'and') return 'heal';
-      if (role === 'heal') return 'and';
+      var role = el.dataset.pressureRole || el.dataset.role || '';
 
-      return role;
+      if (role !== 'and') return false;
+
+      var slide = el.closest(CONFIG.slideSelector);
+
+      if (!slide) return false;
+
+      return Array.prototype.slice.call(slide.querySelectorAll(CONFIG.itemSelector)).some(function (item) {
+        var itemRole = item.dataset.pressureRole || item.dataset.role || '';
+
+        return itemRole === 'heal' && item.children.length === 0;
+      });
     }
 
     function isMobileLabelLocked(el, layout) {
@@ -849,7 +859,7 @@
 
       var role = el.dataset.pressureRole || el.dataset.role || '';
 
-      return role === 'chill' || role === 'heal' || role === 'and';
+      return role === 'chill' || role === 'and';
     }
 
     function getSafeVideoUrl(value) {
