@@ -445,19 +445,14 @@
 
       var intro = mask.__pressureIntro;
 
+      if (intro && intro.waitForMedia) return;
+
       if (
         !reduceMotion &&
         intro &&
-        (
-          (intro.waitForMedia && intro.startedAt === null) ||
-          (
-            intro.startedAt !== null &&
-            time < intro.startedAt + CONFIG.introScaleDuration * CONFIG.initialRevealProgress
-          )
-        )
-      ) {
-        return;
-      }
+        intro.startedAt !== null &&
+        time < intro.startedAt + CONFIG.introScaleDuration * CONFIG.initialRevealProgress
+      ) return;
 
       state.movers = buildMovers(slide, time, false, 'in', state.layout);
       transitionPressureMovers(state.movers, time, 1, 0);
@@ -1430,6 +1425,7 @@
       var intro = mask.__pressureIntro;
 
       if (reduceMotion || !intro || !intro.active) return 1;
+      if (intro.waitForMedia) return CONFIG.introScale;
 
       if (intro.startedAt === null) intro.startedAt = time;
 
