@@ -21,6 +21,12 @@
     will-change: transform, opacity;
   }
 
+  .pressure-shape-media-layer {
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.9);
+  }
+
   .pressure-shape-video {
     display: block;
     width: 100%;
@@ -58,6 +64,8 @@
     var CONFIG = {
       stageSelector: '.pressure-shape-stage',
       maskSelector: '.pressure-shape-mask',
+      mediaItemSelector: '[data-pressure-media-item]',
+      mediaSelector: '[data-pressure-media]',
       slideSelector: '.pressure-shape-slide',
       itemSelector: '.pressure-shape-item',
       points: 170,
@@ -117,6 +125,11 @@
       introDuration: 1400,
       introScaleDuration: 1400,
       introPhotoScale: 1.2,
+      photoHoldDuration: 5000,
+      mediaOpacityDuration: 600,
+      mediaScaleDuration: 1200,
+      mediaIncomingScale: 0.9,
+      mediaOutgoingScale: 1.1,
       initialRevealProgress: 0.4,
       pathD: 'M16.1953 484.712C-35.3047 349.712 48.1953 227.212 96.6996 108.713C124.753 40.178 170.835 -31.3315 285.968 14.483C404.202 49.7126 428.424 78.3059 461.697 117.213C523.7 189.713 545.698 179.212 569.696 399.212C575.94 456.455 589.597 515.465 612.204 553.213C671.195 651.712 625.768 738.727 612.203 791.713C598.637 844.7 484.042 942.999 442.937 966.747C401.833 990.495 339.938 970.578 295.2 934.213C250.461 897.848 244.695 847.712 172.695 806.212C6.82711 710.607 87.8009 672.416 16.1953 484.712Z'
     };
@@ -145,7 +158,8 @@
     });
 
     function initPressureShape(stage, points) {
-      var mask = stage.querySelector(CONFIG.maskSelector);
+      var mediaCarousel = createMaskMediaCarousel(stage);
+      var mask = mediaCarousel ? mediaCarousel.mask : stage.querySelector(CONFIG.maskSelector);
       var realSlides = Array.prototype.slice.call(stage.querySelectorAll(CONFIG.slideSelector));
       var hasSlides = realSlides.length > 0;
       var slides = hasSlides ? realSlides : [stage];
@@ -161,7 +175,6 @@
         CONFIG.respectReducedMotion &&
         window.matchMedia &&
         window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      var videoLayer = createMaskVideo(mask);
 
       var state = {
         activeSlideIndex: 0,
@@ -196,7 +209,7 @@
       showSlide(slides[0], hasSlides);
 
       bindCursorPressure(stage, state);
-      startMaskIntro(mask, reduceMotion, videoLayer);
+      startMaskIntro(mask, reduceMotion, mediaCarousel);
       requestAnimationFrame(frame);
 
       function frame(time) {
@@ -865,36 +878,402 @@
       }
     }
 
-    function createMaskVideo(mask) {
-      var source = getSafeVideoUrl(mask.getAttribute('data-pressure-video-url'));
+    function createMaskMediaCarousel(stage) {
+      var collection = collectMaskMedia(stage);
+      var mask = collection.sources.length
+        ? collection.sources[0].element
+        : stage.querySelector(CONFIG.maskSelector);
 
-      if (!source) {
-        if (mask.getAttribute('data-pressure-video-url')) {
-          mask.classList.add('is-pressure-video-error');
-        }
-        return null;
-      }
+      if (!mask) return null;
+
+      var hostItem = collection.sources.length ? collection.sources[0].item : null;
+
+      collection.items.forEach(function (item) {
+        if (item !== hostItem) item.style.display = 'none';
+      });
+
+      Array.prototype.slice.call(stage.querySelectorAll(CONFIG.mediaSelector)).forEach(function (element) {
+        if (element !== mask) element.style.display = 'none';
+      });
 
       if (window.getComputedStyle(mask).position === 'static') mask.style.position = 'relative';
 
+      var entries = collection.sources.map(function (source) {
+        return createMaskMediaEntry(mask, source);
+      });
+
+      if (entries.length) {
+        mask.style.backgroundImage = 'none';
+        mask.style.backgroundColor = 'transparent';
+      }
+
+      return buildMaskMediaCarousel(mask, entries);
+    }
+
+    function collectMaskMedia(stage) {
+      var items = Array.prototype.slice.call(stage.querySelectorAll(CONFIG.mediaItemSelector));
+      var sources = [];
+
+      if (items.length) {
+        items.forEach(function (item) {
+          var videoMask = item.querySelector(CONFIG.mediaSelector + '[data-pressure-media="video"]');
+          var photoMask = item.querySelector(CONFIG.mediaSelector + '[data-pressure-media="photo"]');
+          var rawVideoSource = videoMask && videoMask.getAttribute('data-pressure-video-url');
+          var videoSource = getSafeVideoUrl(rawVideoSource);
+
+          if (videoSource) {
+            sources.push({
+              type: 'video',
+              element: videoMask,
+              item: item,
+              source: videoSource
+            });
+            return;
+          }
+
+          if (videoMask && rawVideoSource) videoMask.classList.add('is-pressure-video-error');
+
+          if (!photoMask) return;
+
+          var background = getBackgroundStyles(photoMask);
+
+          if (!hasBackgroundImage(background.image)) return;
+
+          sources.push({
+            type: 'photo',
+            element: photoMask,
+            item: item,
+            background: background
+          });
+        });
+
+        return { items: items, sources: sources };
+      }
+
+      var legacyMask = stage.querySelector(CONFIG.maskSelector);
+
+      if (!legacyMask) return { items: [], sources: [] };
+
+      var legacyRawVideoSource = legacyMask.getAttribute('data-pressure-video-url');
+      var legacyVideoSource = getSafeVideoUrl(legacyRawVideoSource);
+
+      if (legacyVideoSource) {
+        sources.push({
+          type: 'video',
+          element: legacyMask,
+          item: null,
+          source: legacyVideoSource
+        });
+      } else {
+        if (legacyRawVideoSource) legacyMask.classList.add('is-pressure-video-error');
+
+        var legacyBackground = getBackgroundStyles(legacyMask);
+
+        if (hasBackgroundImage(legacyBackground.image)) {
+          sources.push({
+            type: 'photo',
+            element: legacyMask,
+            item: null,
+            background: legacyBackground
+          });
+        }
+      }
+
+      return { items: [], sources: sources };
+    }
+
+    function hasBackgroundImage(backgroundImage) {
+      return /url\((['"]?)(.*?)\1\)/.test(backgroundImage || '');
+    }
+
+    function createMaskMediaEntry(mask, source) {
       var layer = document.createElement('div');
-      var video = document.createElement('video');
+      var entry = {
+        type: source.type,
+        layer: layer,
+        status: 'idle',
+        readyCallbacks: []
+      };
 
-      layer.className = 'pressure-shape-photo-layer pressure-shape-video-layer';
-      video.className = 'pressure-shape-video';
-      video.src = source;
-      video.muted = true;
-      video.defaultMuted = true;
-      video.loop = true;
-      video.playsInline = true;
-      video.preload = 'auto';
-      video.setAttribute('aria-hidden', 'true');
-      video.setAttribute('tabindex', '-1');
-      layer.appendChild(video);
+      layer.className = 'pressure-shape-photo-layer pressure-shape-media-layer';
+      layer.style.opacity = '0';
+      layer.style.visibility = 'hidden';
+      layer.style.transform = 'scale(' + CONFIG.mediaIncomingScale + ')';
+
+      if (source.type === 'video') {
+        var video = document.createElement('video');
+
+        layer.classList.add('pressure-shape-video-layer');
+        video.className = 'pressure-shape-video';
+        video.src = source.source;
+        video.muted = true;
+        video.defaultMuted = true;
+        video.loop = false;
+        video.playsInline = true;
+        video.preload = 'auto';
+        video.setAttribute('aria-hidden', 'true');
+        video.setAttribute('tabindex', '-1');
+        layer.appendChild(video);
+        entry.video = video;
+      } else {
+        entry.background = source.background;
+        copyBackgroundStyles(source.background, layer);
+      }
+
       mask.appendChild(layer);
-      video.load();
 
-      return { element: video, layer: layer };
+      if (entry.video) entry.video.load();
+
+      return entry;
+    }
+
+    function buildMaskMediaCarousel(mask, entries) {
+      var activeIndex = -1;
+      var photoTimer = 0;
+      var transitionActive = false;
+      var introPending = false;
+      var pendingAdvance = false;
+
+      entries.forEach(function (entry, index) {
+        if (!entry.video) return;
+
+        entry.video.addEventListener('ended', function () {
+          if (index !== activeIndex) return;
+
+          if (introPending || transitionActive) {
+            pendingAdvance = true;
+            return;
+          }
+
+          requestNext();
+        });
+      });
+
+      function getAvailableCount() {
+        return entries.filter(function (entry) {
+          return entry.status !== 'error';
+        }).length;
+      }
+
+      function updateVideoLoops() {
+        var shouldLoop = getAvailableCount() <= 1;
+
+        entries.forEach(function (entry) {
+          if (entry.video) entry.video.loop = shouldLoop;
+        });
+      }
+
+      function ensureEntryReady(entry, callback) {
+        if (entry.status === 'ready') {
+          callback(true);
+          return;
+        }
+
+        if (entry.status === 'error') {
+          callback(false);
+          return;
+        }
+
+        entry.readyCallbacks.push(callback);
+
+        if (entry.status === 'loading') return;
+
+        entry.status = 'loading';
+
+        function complete(isReady) {
+          entry.status = isReady ? 'ready' : 'error';
+
+          if (!isReady) {
+            entry.layer.remove();
+            updateVideoLoops();
+          }
+
+          var callbacks = entry.readyCallbacks.slice();
+
+          entry.readyCallbacks.length = 0;
+          callbacks.forEach(function (readyCallback) {
+            readyCallback(isReady);
+          });
+        }
+
+        if (entry.video) {
+          waitForVideoFrame(entry.video, complete);
+        } else {
+          waitForBackgroundImage(entry.background.image, complete);
+        }
+      }
+
+      function findNextReadyIndex(fromIndex, callback) {
+        var checked = 0;
+        var index = fromIndex;
+
+        function checkNext() {
+          if (checked >= entries.length) {
+            callback(-1);
+            return;
+          }
+
+          index = (index + 1) % entries.length;
+          checked += 1;
+
+          if (entries[index].status === 'error') {
+            checkNext();
+            return;
+          }
+
+          ensureEntryReady(entries[index], function (isReady) {
+            if (isReady) {
+              callback(index);
+            } else {
+              checkNext();
+            }
+          });
+        }
+
+        checkNext();
+      }
+
+      function clearPhotoTimer() {
+        if (!photoTimer) return;
+
+        window.clearTimeout(photoTimer);
+        photoTimer = 0;
+      }
+
+      function schedulePhotoAdvance() {
+        clearPhotoTimer();
+
+        if (getAvailableCount() < 2) return;
+
+        photoTimer = window.setTimeout(function () {
+          photoTimer = 0;
+          requestNext();
+        }, CONFIG.photoHoldDuration);
+      }
+
+      function resetVideo(entry) {
+        if (!entry || !entry.video) return;
+
+        entry.video.pause();
+
+        try {
+          entry.video.currentTime = 0;
+        } catch (error) {}
+      }
+
+      function playVideo(entry) {
+        if (!entry || !entry.video) return;
+
+        var playPromise = entry.video.play();
+
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch(function () {
+            if (entries[activeIndex] !== entry || getAvailableCount() < 2) return;
+
+            if (introPending || transitionActive) {
+              pendingAdvance = true;
+              return;
+            }
+
+            schedulePhotoAdvance();
+          });
+        }
+      }
+
+      function activateEntry(entry) {
+        updateVideoLoops();
+
+        if (entry.video) {
+          playVideo(entry);
+        } else {
+          schedulePhotoAdvance();
+        }
+      }
+
+      function requestNext() {
+        if (introPending) {
+          pendingAdvance = true;
+          return;
+        }
+
+        if (transitionActive || activeIndex < 0 || getAvailableCount() < 2) return;
+
+        transitionActive = true;
+        clearPhotoTimer();
+
+        findNextReadyIndex(activeIndex, function (nextIndex) {
+          if (nextIndex < 0 || nextIndex === activeIndex) {
+            transitionActive = false;
+            updateVideoLoops();
+
+            if (nextIndex === activeIndex && entries[activeIndex].video) {
+              resetVideo(entries[activeIndex]);
+              playVideo(entries[activeIndex]);
+            }
+
+            return;
+          }
+
+          var outgoing = entries[activeIndex];
+          var incoming = entries[nextIndex];
+
+          resetVideo(incoming);
+          incoming.layer.style.visibility = 'visible';
+          incoming.layer.style.zIndex = '2';
+          outgoing.layer.style.zIndex = '1';
+
+          playMediaTransition(outgoing.layer, incoming.layer, function () {
+            resetVideo(outgoing);
+            outgoing.layer.style.visibility = 'hidden';
+            outgoing.layer.style.zIndex = '0';
+            incoming.layer.style.zIndex = '1';
+            activeIndex = nextIndex;
+            transitionActive = false;
+            pendingAdvance = false;
+            activateEntry(incoming);
+          });
+        });
+      }
+
+      return {
+        mask: mask,
+        prepareInitial: function (callback) {
+          findNextReadyIndex(-1, function (index) {
+            if (index < 0) {
+              callback(null);
+              return;
+            }
+
+            activeIndex = index;
+            updateVideoLoops();
+            callback(entries[index]);
+          });
+        },
+        showInitial: function (entry, animateIntro, reduceMotion) {
+          resetVideo(entry);
+          entry.layer.style.visibility = 'visible';
+          entry.layer.style.zIndex = '1';
+          entry.layer.style.opacity = animateIntro ? '0' : '1';
+          entry.layer.style.transform = 'scale(' + (animateIntro ? CONFIG.introPhotoScale : 1) + ')';
+          introPending = animateIntro;
+
+          if (entry.video) mask.classList.add('is-pressure-video-ready');
+
+          if (animateIntro && entry.video) playVideo(entry);
+          if (!animateIntro && !reduceMotion) activateEntry(entry);
+        },
+        finishIntro: function () {
+          introPending = false;
+
+          if (pendingAdvance) {
+            pendingAdvance = false;
+            requestNext();
+            return;
+          }
+
+          if (activeIndex >= 0 && !entries[activeIndex].video) schedulePhotoAdvance();
+        }
+      };
     }
 
     function waitForVideoFrame(video, callback) {
@@ -920,84 +1299,39 @@
       }
     }
 
-    function showVideoAsPoster(mask, layer, animateIntro) {
-      mask.style.backgroundImage = 'none';
-      mask.style.backgroundColor = 'transparent';
-      mask.classList.remove('is-pressure-video-error');
-      mask.classList.add('is-pressure-video-ready');
-      layer.style.opacity = animateIntro ? '0' : '1';
-      layer.style.transform = 'scale(' + (animateIntro ? CONFIG.introPhotoScale : 1) + ')';
-      mask.style.opacity = '1';
-    }
-
-    function startVideoPlayback(video) {
-      var playPromise = video.play();
-
-      if (playPromise && typeof playPromise.catch === 'function') {
-        playPromise.catch(function () {});
-      }
-    }
-
-    function startMaskIntro(mask, reduceMotion, videoLayer) {
+    function startMaskIntro(mask, reduceMotion, mediaCarousel) {
       if (mask.__pressureIntroStarted) return;
-
-      if (videoLayer) {
-        var video = videoLayer.element;
-        var layer = videoLayer.layer;
-
-        mask.__pressureIntroStarted = true;
-        mask.__pressureIntro = {
-          active: !reduceMotion && CONFIG.introEnabled,
-          startedAt: null,
-          waitForMedia: true
-        };
-
-        waitForVideoFrame(video, function (isReady) {
-          if (!isReady) {
-            mask.classList.add('is-pressure-video-error');
-            mask.__pressureIntro.waitForMedia = false;
-            layer.remove();
-            startBackgroundIntro(mask);
-            return;
-          }
-
-          if (!CONFIG.introEnabled || reduceMotion) {
-            showVideoAsPoster(mask, layer);
-            return;
-          }
-
-          showVideoAsPoster(mask, layer, true);
-          startVideoPlayback(video);
-          playPhotoIntro(layer);
-        });
-        return;
-      }
-
-      if (!CONFIG.introEnabled || reduceMotion) {
-        mask.style.opacity = '1';
-        return;
-      }
 
       mask.__pressureIntroStarted = true;
       mask.__pressureIntro = {
-        active: true,
+        active: !reduceMotion && CONFIG.introEnabled,
         startedAt: null,
-        waitForMedia: false
+        waitForMedia: true
       };
-      startBackgroundIntro(mask);
-    }
 
-    function startBackgroundIntro(mask) {
-      var background = getBackgroundStyles(mask);
+      if (!mediaCarousel) {
+        mask.__pressureIntro.active = false;
+        mask.__pressureIntro.waitForMedia = false;
+        return;
+      }
 
-      mask.style.backgroundImage = 'none';
-      mask.style.backgroundColor = 'transparent';
+      mediaCarousel.prepareInitial(function (entry) {
+        mask.__pressureIntro.waitForMedia = false;
 
-      waitForBackgroundImage(background.image, function () {
-        var photo = createIntroPhotoLayer(mask, background);
+        if (!entry) {
+          mask.__pressureIntro.active = false;
+          mask.style.opacity = '0';
+          return;
+        }
 
+        var animateIntro = !reduceMotion && CONFIG.introEnabled;
+
+        mediaCarousel.showInitial(entry, animateIntro, reduceMotion);
         mask.style.opacity = '1';
-        playPhotoIntro(photo);
+
+        if (animateIntro) {
+          playPhotoIntro(entry.layer, mediaCarousel.finishIntro);
+        }
       });
     }
 
@@ -1022,39 +1356,25 @@
       var match = backgroundImage.match(/url\((['"]?)(.*?)\1\)/);
 
       if (!match || !match[2]) {
-        callback();
+        callback(false);
         return;
       }
 
       var image = new Image();
       var completed = false;
 
-      function done() {
+      function done(isReady) {
         if (completed) return;
 
         completed = true;
-        callback();
+        callback(isReady);
       }
 
-      image.onload = done;
-      image.onerror = done;
+      image.onload = function () { done(true); };
+      image.onerror = function () { done(false); };
       image.src = match[2];
 
-      if (image.complete) done();
-    }
-
-    function createIntroPhotoLayer(mask, background) {
-      var base = document.createElement('div');
-
-      if (window.getComputedStyle(mask).position === 'static') mask.style.position = 'relative';
-
-      base.className = 'pressure-shape-photo-layer';
-      copyBackgroundStyles(background, base);
-      base.style.opacity = '0';
-      base.style.transform = 'scale(' + CONFIG.introPhotoScale + ')';
-      mask.appendChild(base);
-
-      return base;
+      if (image.complete) done(image.naturalWidth > 0);
     }
 
     function getBackgroundStyles(el) {
@@ -1106,6 +1426,39 @@
 
         photo.style.opacity = '1';
         photo.style.transform = 'scale(1)';
+        if (typeof onComplete === 'function') onComplete();
+      }
+
+      requestAnimationFrame(frame);
+    }
+
+    function playMediaTransition(outgoing, incoming, onComplete) {
+      var startedAt = null;
+      var duration = Math.max(CONFIG.mediaOpacityDuration, CONFIG.mediaScaleDuration);
+
+      function frame(time) {
+        if (startedAt === null) startedAt = time;
+
+        var elapsed = time - startedAt;
+        var opacityProgress = easeOutCubic(clamp(elapsed / CONFIG.mediaOpacityDuration, 0, 1));
+        var scaleProgress = easeOutCirc(clamp(elapsed / CONFIG.mediaScaleDuration, 0, 1));
+        var outgoingScale = 1 + (CONFIG.mediaOutgoingScale - 1) * scaleProgress;
+        var incomingScale = CONFIG.mediaIncomingScale + (1 - CONFIG.mediaIncomingScale) * scaleProgress;
+
+        outgoing.style.opacity = (1 - opacityProgress).toFixed(3);
+        outgoing.style.transform = 'scale(' + outgoingScale.toFixed(4) + ')';
+        incoming.style.opacity = opacityProgress.toFixed(3);
+        incoming.style.transform = 'scale(' + incomingScale.toFixed(4) + ')';
+
+        if (elapsed < duration) {
+          requestAnimationFrame(frame);
+          return;
+        }
+
+        outgoing.style.opacity = '0';
+        outgoing.style.transform = 'scale(' + CONFIG.mediaOutgoingScale + ')';
+        incoming.style.opacity = '1';
+        incoming.style.transform = 'scale(1)';
         if (typeof onComplete === 'function') onComplete();
       }
 
