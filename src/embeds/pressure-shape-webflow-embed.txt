@@ -1175,6 +1175,14 @@
         }
       }
 
+      function preloadRemainingEntries() {
+        entries.forEach(function (entry, index) {
+          if (index === activeIndex || entry.status === 'error') return;
+
+          ensureEntryReady(entry, function () {});
+        });
+      }
+
       function findNextReadyIndex(fromIndex, callback) {
         var checked = 0;
         var index = fromIndex;
@@ -1233,13 +1241,14 @@
         } catch (error) {}
       }
 
-      function playVideo(entry) {
+      function playVideo(entry, ignoreFailure) {
         if (!entry || !entry.video) return;
 
         var playPromise = entry.video.play();
 
         if (playPromise && typeof playPromise.catch === 'function') {
           playPromise.catch(function () {
+            if (ignoreFailure) return;
             if (entries[activeIndex] !== entry || getAvailableCount() < 2) return;
 
             if (introPending || transitionActive) {
@@ -1293,14 +1302,23 @@
           incoming.layer.style.visibility = 'visible';
           incoming.layer.style.zIndex = '2';
           outgoing.layer.style.zIndex = '1';
+          activeIndex = nextIndex;
+
+          if (incoming.video) playVideo(incoming, true);
 
           playMediaTransition(outgoing.layer, incoming.layer, function () {
             resetVideo(outgoing);
             outgoing.layer.style.visibility = 'hidden';
             outgoing.layer.style.zIndex = '0';
             incoming.layer.style.zIndex = '1';
-            activeIndex = nextIndex;
             transitionActive = false;
+
+            if (pendingAdvance || (incoming.video && incoming.video.ended)) {
+              pendingAdvance = false;
+              requestNext();
+              return;
+            }
+
             pendingAdvance = false;
             activateEntry(incoming);
           });
@@ -1333,6 +1351,7 @@
 
           if (animateIntro && entry.video) playVideo(entry);
           if (!animateIntro && !reduceMotion) activateEntry(entry);
+          preloadRemainingEntries();
         },
         finishIntro: function () {
           introPending = false;
