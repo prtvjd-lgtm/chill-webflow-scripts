@@ -166,6 +166,7 @@ document.addEventListener("DOMContentLoaded", function () {
       popup.classList.remove("is-visible");
       popup.classList.remove("is-closing");
       popup.classList.remove("is-content-hidden");
+      popup.remove();
     }, 300);
   }
 
